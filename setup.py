@@ -7,13 +7,13 @@ MICRO_VERSION = '1'
 VERSION = "{}.{}.{}".format(MAJOR_VERSION, MINOR_VERSION, MICRO_VERSION)
 
 setup(
-    name='mincli',
+    name='cliche',
     version=VERSION,
     description="A minimalistic CLI wrapper out to be the best",
-    url='https://github.com/kootenpv/mincli',
+    url='https://github.com/kootenpv/cliche',
     author='Pascal van Kooten',
     author_email='kootenpv@gmail.com',
-    entry_points={'console_scripts': ['mincli = mincli.__init__:main']},
+    entry_points={'console_scripts': ['cliche = cliche.__init__:main']},
     license='MIT',
     packages=find_packages(),
     include_package_data=True,

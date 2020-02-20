@@ -47,7 +47,7 @@ def parse_sphinx_param_descriptions(doc):
             stack = {}
             if line.startswith(":param"):
                 fn_name = line.split(":")[1].split()[-1]
-                stack = {"fn": fn_name, "lines": [line.split(":")[2].strip()]}
+                stack = {"fn": fn_name, "lines": [line.split(":", 2)[2].strip()]}
         elif stack:
             stack["lines"].append(line.strip())
     if stack:
@@ -88,7 +88,7 @@ def get_parser():
     module_doc = frame.f_code.co_consts[0]
     module_doc = module_doc if isinstance(module_doc, str) else None
     parser = HelpOnErrorParser(description=module_doc)
-    from mincli import registry
+    from cliche import registry
 
     if registry:
         subparsers = parser.add_subparsers(dest="command")
@@ -100,7 +100,7 @@ def get_parser():
 
 
 def main(exclude_module_names=None):
-    if "mincli" in sys.argv[0]:
+    if "cliche" in sys.argv[0]:
         module_name = sys.argv[1]
         sys.argv.remove(module_name)
         import importlib.util
@@ -129,6 +129,6 @@ def main(exclude_module_names=None):
     if cmd is None:
         parser.print_help()
     else:
-        from mincli import registry
+        from cliche import registry
 
         registry[cmd][0](*arguments._get_args(), **kwargs)

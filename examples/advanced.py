@@ -1,5 +1,5 @@
-"""Can be called like "python advanced.py" or "mincli advanced.py" """
-from mincli import cli, main
+"""Can be called like "python advanced.py" or "cliche advanced.py" """
+from cliche import cli, main
 
 
 @cli

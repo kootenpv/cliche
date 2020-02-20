@@ -1,4 +1,4 @@
-from mincli import cli
+from cliche import cli
 
 
 @cli
