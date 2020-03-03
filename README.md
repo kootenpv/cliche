@@ -1,12 +1,13 @@
 # cliche
 
+cliche helps you build simple command-line interface from your functions.
+
 Features:
 
 - Least syntax required, and keeps it DRY
-- Does not reinvent the wheel, standing on the shoulders of giants (e.g. uses argparse, learnings from others)
-- Lightweight: few lines of code
 - Uses all information available like *annotations*, *default values* and *docstrings*, yet does not require them.
 - Just decorate a function - that is it - it can now be called as CLI but also remains usable by other functions
+- Does not reinvent the wheel, standing on the shoulders of giants (e.g. uses argparse, learnings from others)
 
 ## Examples
 
