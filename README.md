@@ -1,13 +1,15 @@
-# cliche
+<p align="center">
+  <img src="./resources/logo.jpg" />
+</p>
 
-cliche helps you build simple command-line interface from your functions.
+Build a simple command-line interface from your functions.
 
 Features:
 
 - Least syntax required, and keeps it DRY
 - Uses all information available like *annotations*, *default values* and *docstrings*, yet does not require them.
 - Just decorate a function - that is it - it can now be called as CLI but also remains usable by other functions
-- Does not reinvent the wheel, standing on the shoulders of giants (e.g. uses argparse, learnings from others)
+- Does not reinvent the wheel, standing on the shoulders of giants (e.g. uses argparse and learnings from others)
 
 ## Examples
 
@@ -39,7 +41,7 @@ Now let's see how to use it from the command-line:
 
 thus:
 
-    cliche calculator.py add 1 10
+    pascal@archbook:~/$ cliche calculator.py add 1 10
     11
 
 #### Advanced Example
@@ -80,7 +82,7 @@ Calling it:
 
 #### More examples
 
-Check the example files [here](https://github.com/kootenpv//tree/master/examples)
+Check the example files [here](https://github.com/kootenpv/tree/master/examples)
 
 ## Similar, and familiar to
 
