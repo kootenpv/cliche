@@ -1,15 +1,18 @@
 <p align="center">
-  <img src="./resources/logo.jpg" />
+  <img src="./resources/logo.gif"/>
 </p>
+
+# Cliche
 
 Build a simple command-line interface from your functions.
 
 Features:
 
-- Least syntax required, and keeps it DRY
-- Uses all information available like *annotations*, *default values* and *docstrings*, yet does not require them.
-- Just decorate a function - that is it - it can now be called as CLI but also remains usable by other functions
-- Does not reinvent the wheel, standing on the shoulders of giants (e.g. uses argparse and learnings from others)
+- Least syntax required: you do not need to learn a "library" to use this
+- keeps it DRY (Don't Repeat yourself):
+  - it uses all information available like *annotations*, *default values* and *docstrings*... yet does not require them.
+- Just decorate a function with `@cli` - that is it - it can now be called as CLI but also remains usable by other functions
+- Standing on the shoulders of giants (i.e. it uses argparse and learnings from others) -> lightweight
 
 ## Examples
 
@@ -64,7 +67,7 @@ def sum_or_multiply(a_number: int, b_number: int = 10, sums: bool = False):
         print(a_number * b_number)
 ```
 
-Calling it:
+Help:
 
     pascal@archbook:~/$ cliche calculator.py sum_or_multiply --help
 
@@ -80,14 +83,25 @@ Calling it:
       --b_number B_NUMBER  |int| Default: 10 | This parameter seems to be
       --sums               |bool| Default: False | Sums when true, otherwise multiply
 
+Calling it:
+
+    pascal@archbook:~/$ cliche calculator.py sum_or_multiply 1
+    10
+
+    pascal@archbook:~/$ cliche calculator.py sum_or_multiply --sum 1
+    11
+
+    pascal@archbook:~/$ cliche calculator.py sum_or_multiply --b_number 3 2
+    6
+
 #### More examples
 
 Check the example files [here](https://github.com/kootenpv/tree/master/examples)
 
-## Similar, and familiar to
+## Comparison with other CLI generators
 
-  - argparse: you need a lot of code to construct an argparse CLI yet it is powerful
-  - click: you need a lot of decorators to construct a CLI, not obvious in usage by default
+  - argparse: it is powerful, but you need a lot of code to construct an argparse CLI
+  - click: you need a lot of decorators to construct a CLI, and not obvious how to use it
   - hug (cli): connected to a whole web framework, but gets a lot right
-  - python-fire: low set up, but annoying traces all the time, does not show default values nor types
+  - python-fire: low set up, but annoying traces all the time / ugly design, does not show default values nor types
   - cleo: requires too much code/objects to construct

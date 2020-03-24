@@ -3,7 +3,7 @@ import sys
 import argparse
 from inspect import signature, currentframe
 
-registry = {}
+fn_registry = {}
 pydantic_models = {}
 
 
@@ -26,7 +26,7 @@ def cli(fn):
             warn(f"Fault while calling {fn.__name__}{signature(fn)} with the above arguments")
             raise
 
-    registry[fn.__name__] = (decorated_fn, fn)
+    fn_registry[fn.__name__] = (decorated_fn, fn)
 
     return fn
 
@@ -128,11 +128,11 @@ def get_parser():
     module_doc = frame.f_code.co_consts[0]
     module_doc = module_doc if isinstance(module_doc, str) else None
     parser = HelpOnErrorParser(description=module_doc)
-    from cliche import registry
+    from cliche import fn_registry
 
-    if registry:
+    if fn_registry:
         subparsers = parser.add_subparsers(dest="command")
-        for fn_name, (decorated_fn, fn) in registry.items():
+        for fn_name, (decorated_fn, fn) in fn_registry.items():
             cmd = add_command(subparsers, fn_name, fn)
             add_arguments_to_command(cmd, fn)
 
@@ -151,10 +151,10 @@ def main(exclude_module_names=None, *parser_args):
     if exclude_module_names is not None:
         # exclude module namespaces
         for x in exclude_module_names:
-            for k, v in list(registry.items()):
+            for k, v in list(fn_registry.items()):
                 _, fn = v
                 if x in fn.__module__:
-                    registry.pop(k)
+                    fn_registry.pop(k)
     parser = get_parser()
     if parser_args:
         arguments = parser.parse_args(parser_args)
@@ -172,6 +172,6 @@ def main(exclude_module_names=None, *parser_args):
     if cmd is None:
         parser.print_help()
     else:
-        from cliche import registry
+        from cliche import fn_registry
 
-        registry[cmd][0](*arguments._get_args(), **kwargs)
+        fn_registry[cmd][0](*arguments._get_args(), **kwargs)
