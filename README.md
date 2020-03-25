@@ -96,7 +96,7 @@ Calling it:
 
 #### More examples
 
-Check the example files [here](https://github.com/kootenpv/tree/master/examples)
+Check the example files [here](https://github.com/kootenpv/cliche/tree/master/examples)
 
 ## Comparison with other CLI generators
 
