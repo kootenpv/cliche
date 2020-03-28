@@ -65,10 +65,10 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                     message = message.replace("positional arguments:", "POSITIONAL ARGUMENTS:")
                     message = message.replace("optional arguments:", "OPTIONAL ARGUMENTS:")
                     message = re.sub(
-                        "Usage: cliche.+", "\x1b[" + color + "m" + "\g<0>" + "\x1b[0m", message
+                        "Usage: cliche.+", "\x1b[" + color + "m" + r"\g<0>" + "\x1b[0m", message
                     )
                     message = re.sub(
-                        "Default: [^|]+", "\x1b[" + color + "m" + "\g<0>" + "\x1b[0m", message
+                        "Default: [^|]+", "\x1b[" + color + "m" + r"\g<0>" + "\x1b[0m", message
                     )
 
                     for reg in [
@@ -76,7 +76,7 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                         "\n +--[^ ]+",
                         "\n  ? ? ? ? ? ?[a-z0-9A-Z_-]+",
                     ]:
-                        message = re.sub(reg, "\x1b[" + color + "m" + "\g<0>" + "\x1b[0m", message)
+                        message = re.sub(reg, "\x1b[" + color + "m" + r"\g<0>" + "\x1b[0m", message)
                     file.write(message + "\n")
                 else:
                     file.write('\x1b[' + color + 'm' + message.strip() + '\x1b[0m\n')
@@ -118,6 +118,7 @@ def cli(fn):
         if "traceback" in kwargs:
             show_traceback = kwargs.pop("traceback")
         try:
+            kwargs = {k.replace("-", "_"): v for k, v in kwargs.items()}
             if fn in pydantic_models:
                 for var_name in pydantic_models[fn]:
                     model, model_args = pydantic_models[fn][var_name]
@@ -138,6 +139,32 @@ def cli(fn):
     return fn
 
 
+GOOGLE_DOC_RE = re.compile(r"^[^ ] +:|^[^ ]+ +\([^\)]+\):")
+
+
+def parse_google_param_descriptions(doc):
+    stack = {}
+    results = {}
+    args_seen = False
+    for line in doc.split("\n"):
+        line = line.strip()
+        if line == "Returns:":
+            break
+        if not args_seen:
+            if line == "Args:":
+                args_seen = True
+        elif GOOGLE_DOC_RE.search(line):
+            if stack:
+                results[stack["fn"]] = "\n".join(stack["lines"])
+            fn_name = line.split(":")[0].split()[0]
+            stack = {"fn": fn_name, "lines": [GOOGLE_DOC_RE.sub("", line).strip()]}
+        elif stack and line.strip():
+            stack["lines"].append(line.strip())
+    if stack:
+        results[stack["fn"]] = "\n".join(stack["lines"])
+    return results
+
+
 def parse_sphinx_param_descriptions(doc):
     stack = {}
     results = {}
@@ -150,7 +177,7 @@ def parse_sphinx_param_descriptions(doc):
             if line.startswith(":param"):
                 fn_name = line.split(":")[1].split()[-1]
                 stack = {"fn": fn_name, "lines": [line.split(":", 2)[2].strip()]}
-        elif stack:
+        elif stack and line.strip():
             stack["lines"].append(line.strip())
     if stack:
         results[stack["fn"]] = "\n".join(stack["lines"])
@@ -203,16 +230,22 @@ def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc):
         action = "store_true" if not default else "store_false"
         parser_cmd.add_argument("--" + var_name, action=action, help=arg_desc)
         return
-    nargs = 1
+    nargs = None
     if default != "--1":
         var_name = "--" + var_name
     if container_type:
         try:
             tp = tp.__args__[0]
+            nargs = "+"
         except AttributeError:
             pass
-    nargs = "+"
     parser_cmd.add_argument(var_name, type=tp, nargs=nargs, default=default, help=arg_desc)
+
+
+def parse_doc_params(doc_str):
+    doc_params = parse_sphinx_param_descriptions(doc_str)
+    doc_params.update(parse_google_param_descriptions(doc_str))
+    return doc_params
 
 
 def add_arguments_to_command(cmd, fn):
@@ -220,7 +253,7 @@ def add_arguments_to_command(cmd, fn):
     arg_count = fn.__code__.co_argcount
     defs = fn.__defaults__ or tuple()
     defaults = (("--1",) * arg_count + defs)[-arg_count:]
-    sphinx_params = parse_sphinx_param_descriptions(doc_str)
+    doc_params = parse_doc_params(doc_str)
     for var_name, default in zip(fn.__code__.co_varnames, defaults):
         default_help = f"Default: {default} | " if default != "--1" else ""
         default_type = type(default) if default != "--1" and default is not None else None
@@ -246,13 +279,12 @@ def add_arguments_to_command(cmd, fn):
                 tp_name = "1 or more of: " + tp_args
             else:
                 tp_name = tp.__name__
-
         if is_pydantic(tp):
             # msg = f"Cannot use pydantic just yet, argument {var_name!r} (type {tp.__name__}) on cmd {cmd.prog!r}"
             # raise ValueError(msg)
             add_group(cmd, tp, fn, var_name)
             continue
-        arg_desc = f"|{tp_name}| {default_help}" + sphinx_params.get(var_name, "")
+        arg_desc = f"|{tp_name}| {default_help}" + doc_params.get(var_name, "")
         add_argument(cmd, tp, container_type, var_name, default, arg_desc)
 
 
@@ -298,6 +330,7 @@ def main(exclude_module_names=None, *parser_args):
                 if x in fn.__module__:
                     fn_registry.pop(k)
     parser = get_parser()
+
     if parser_args:
         arguments = parser.parse_args(parser_args)
     else:
