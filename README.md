@@ -31,16 +31,18 @@ def add(a: int, b: int):
 
 Now let's see how to use it from the command-line:
 
-    pascal@archbook:~/$ cliche calculator.py add --help
+```
+pascal@archbook:~/$ cliche calculator.py add --help
 
-    usage: cliche add [-h] a b
+usage: cliche add [-h] a b
 
-    positional arguments:
-      a           |int|
-      b           |int|
+positional arguments:
+  a           |int|
+  b           |int|
 
-    optional arguments:
-      -h, --help  show this help message and exit
+optional arguments:
+  -h, --help  show this help message and exit
+```
 
 thus:
 

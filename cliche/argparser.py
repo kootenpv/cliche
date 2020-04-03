@@ -81,6 +81,7 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
 def add_command(subparsers, fn_name, fn):
     doc_str = fn.__doc__ or ""
     desc = re.split("^ *Parameter|^ *Return|^ *Example|:param|\n\n", doc_str)[0].strip()
+    desc = desc.replace("%", "%%")
     cmd = subparsers.add_parser(fn_name.replace("_", "-"), help=desc, description=desc)
     return cmd
 
@@ -137,6 +138,7 @@ def get_var_names(var_name, abbrevs):
 def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, abbrevs):
     action = "store"
     var_name = var_name.replace("_", "-")
+    arg_desc = arg_desc.replace("%", "%%")
     if tp is bool:
         action = "store_true" if not default else "store_false"
         var_names = get_var_names("--" + var_name, abbrevs)
@@ -151,7 +153,6 @@ def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, ab
             nargs = "+"
         except AttributeError as e:
             pass
-
     var_names = get_var_names(var_name, abbrevs)
     parser_cmd.add_argument(*var_names, type=tp, nargs=nargs, default=default, help=arg_desc)
 
