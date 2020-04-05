@@ -71,19 +71,7 @@ def sum_or_multiply(a_number: int, b_number: int = 10, sums: bool = False):
 
 Help:
 
-    pascal@archbook:~/$ cliche calculator.py sum_or_multiply --help
-
-    usage: cliche sum_or_multiply [-h] [--b_number B_NUMBER] [--sums] a_number
-
-    Sums or multiplies a and b
-
-    positional arguments:
-      a_number             |int| the first one
-
-    optional arguments:
-      -h, --help           show this help message and exit
-      --b_number B_NUMBER  |int| Default: 10 | This parameter seems to be
-      --sums               |bool| Default: False | Sums when true, otherwise multiply
+![cliche rendered](./resources/cliche_rendered.png)
 
 Calling it:
 
