@@ -1,4 +1,4 @@
-#!{{bin_path}}/python
+{{first_line}}
 
 # the above should be dynamic
 import os

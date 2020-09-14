@@ -5,6 +5,8 @@ from jinja2 import Template
 
 def install(name, **kwargs):
     cliche_path = os.path.dirname(os.path.realpath(__file__))
+    with open(cliche_path) as f:
+        first_line = f.read().split("\n")[0]
     cwd = os.getcwd()
     bin_path = os.path.dirname(sys.argv[0])
     bin_name = os.path.join(bin_path, name)
@@ -14,7 +16,7 @@ def install(name, **kwargs):
     with open(template_path) as f:
         template = Template(f.read())
     with open(bin_name, "w") as f:
-        f.write(template.render(cwd=cwd, bin_name=bin_name, bin_path=bin_path))
+        f.write(template.render(cwd=cwd, bin_name=bin_name, first_line=first_line))
     os.system("chmod +x " + bin_name)
 
 
