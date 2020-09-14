@@ -5,7 +5,7 @@ from jinja2 import Template
 
 def install(name, **kwargs):
     cliche_path = os.path.dirname(os.path.realpath(__file__))
-    with open(cliche_path) as f:
+    with open(sys.argv[0]) as f:
         first_line = f.read().split("\n")[0]
     cwd = os.getcwd()
     bin_path = os.path.dirname(sys.argv[0])
