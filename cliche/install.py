@@ -27,5 +27,11 @@ def uninstall(name, **kwargs):
         txt = f.read()
         if "from cliche" not in txt:
             raise ValueError("This executable does not seem installed by cliche")
-    os.remove(bin_name)
-    os.remove(bin_name + ".cache")
+    try:
+        os.remove(bin_name)
+    except FileNotFoundError:
+        pass
+    try:
+        os.remove(bin_name + ".cache")
+    except FileNotFoundError:
+        pass

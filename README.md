@@ -8,12 +8,16 @@ Build a simple command-line interface from your functions.
 
 Features:
 
-- Least syntax required: you do not need to learn a "library" to use this
-- keeps it DRY (Don't Repeat yourself):
+- ✓ Least syntax required: you do not need to learn a "library" to use this
+- ✓ keeps it DRY (Don't Repeat yourself):
   - it uses all information available like *annotations*, *default values* and *docstrings*... yet does not require them.
-- Just decorate a function with `@cli` - that is it - it can now be called as CLI but also remains usable by other functions
-- Allows creation of executables
-- Standing on the shoulders of giants (i.e. it uses argparse and learnings from others) -> lightweight
+- ✓ Just decorate a function with `@cli` - that is it - it can now be called as CLI but also remains usable by other functions
+- ✓ Works with booleans (flags) and lists (multiple args) automatically
+- ✓ Standing on the shoulders of giants (i.e. it uses argparse and learnings from others) -> lightweight
+- ✓ Outputs python objects to JSON (unless passing `--raw`)
+- ✓ Colorized output
+- ✓ Creates shortcuts, e.g. a variable "long_option" will be usable like `--long-option` and `-l`
+- ✓ No external dependencies
 
 ## Examples
 
@@ -50,6 +54,18 @@ thus:
 
     pascal@archbook:~/calc$ calc add 1 10
     11
+
+#### Installation of commands
+
+You noticed we ran
+
+    cliche install calc
+
+We can undo this with
+
+    cliche uninstall calc
+
+Note that installing means that all `@cli` functions will be detected in the folder, not just of a single file, even after installation. You only have to install once.
 
 #### Advanced Example
 

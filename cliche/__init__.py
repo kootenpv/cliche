@@ -12,6 +12,7 @@ from cliche.argparser import (
 )
 
 fn_registry = {}
+main_called = []
 
 
 def warn(x):
@@ -96,6 +97,9 @@ def get_parser():
 
 
 def main(exclude_module_names=None, *parser_args):
+    if main_called:
+        return
+    main_called.append(True)
     # if "cliche" in sys.argv[0] and "cliche/" not in sys.argv[0]:
     #     module_name = sys.argv[1]
     #     sys.argv.remove(module_name)
