@@ -1,3 +1,5 @@
+import time
+
 import sys
 from inspect import signature, currentframe
 import traceback
@@ -11,6 +13,8 @@ from cliche.argparser import (
     add_command,
 )
 
+# t1 = time.time()
+
 fn_registry = {}
 main_called = []
 
@@ -21,6 +25,8 @@ def warn(x):
 
 
 def cli(fn):
+    # print(fn, time.time() - t1) # for debug
+
     def decorated_fn(*args, **kwargs):
         show_traceback = False
         output_json = False

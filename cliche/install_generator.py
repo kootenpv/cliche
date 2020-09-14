@@ -12,6 +12,7 @@ new_cache = {}
 
 import sys
 
+file_path = "{{cwd}}"
 sys.path.append("{{cwd}}")
 
 new_cache = {}
@@ -39,10 +40,9 @@ for x in glob.glob("{{cwd}}/*.py") + glob.glob("{{cwd}}/**/*.py"):
             "mod_date": mod_date,
             "functions": functions,
             "filename": x,
-            "import_name": x.split("/")[-1][:-3],
+            "import_name": x.replace(file_path, "").strip("/").replace("/", ".").replace(".py", ""),
         }
         new_cache[x] = cache[x]
-
 
 if any_change:
     cache = new_cache

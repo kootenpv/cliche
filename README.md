@@ -72,10 +72,9 @@ Note that installing means that all `@cli` functions will be detected in the fol
 ```python
 from cliche import cli
 
-
 @cli
-def sum_or_multiply(a_number: int, b_number: int = 10, sums: bool = False):
-    """ Sums or multiplies a and b
+def add_or_mul(a_number: int, b_number: int = 10, sums: bool = False):
+    """ Adds or multiplies a and b
 
     :param a_number: the first one
     :param b_number: This parameter seems to be
@@ -93,13 +92,13 @@ Help:
 
 Calling it:
 
-    pascal@archbook:~/calc$ calc sum_or_multiply 1
+    pascal@archbook:~/calc$ calc add_or_mul 1
     10
 
-    pascal@archbook:~/calc$ calc sum_or_multiply --sum 1
+    pascal@archbook:~/calc$ calc add_or_mul --sum 1
     11
 
-    pascal@archbook:~/calc$ calc sum_or_multiply --b_number 3 2
+    pascal@archbook:~/calc$ calc add_or_mul --b_number 3 2
     6
 
 #### More examples
