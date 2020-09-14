@@ -1,4 +1,4 @@
-from cliche import cli, main
+from cliche import cli
 from pydantic import BaseModel
 
 
@@ -14,7 +14,3 @@ class Item(BaseModel):
 @cli
 def print_item(item: Item, b: int = 2):
     print(repr(item), b)
-
-
-# does not yet work without main()
-main()

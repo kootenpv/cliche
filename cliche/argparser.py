@@ -41,9 +41,11 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                         "^Usage: .+", "\x1b[" + color + "m" + r"\g<0>" + "\x1b[0m", message
                     )
                     message = re.sub(
-                        "Default: [^|]+", "\x1b[" + color + "m" + r"\g<0>" + "\x1b[0m", message
+                        "Default:.[^|]+",
+                        "\x1b[" + color + "m" + r"\g<0>" + "\x1b[0m",
+                        message,
+                        flags=re.DOTALL,
                     )
-
                     reg = ", (--[^ ]+) "
                     message = re.sub(
                         reg, ", " + "\x1b[" + color + "m" + r"\g<1> " + "\x1b[0m", message

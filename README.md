@@ -12,6 +12,7 @@ Features:
 - keeps it DRY (Don't Repeat yourself):
   - it uses all information available like *annotations*, *default values* and *docstrings*... yet does not require them.
 - Just decorate a function with `@cli` - that is it - it can now be called as CLI but also remains usable by other functions
+- Allows creation of executables
 - Standing on the shoulders of giants (i.e. it uses argparse and learnings from others) -> lightweight
 
 ## Examples
@@ -32,9 +33,10 @@ def add(a: int, b: int):
 Now let's see how to use it from the command-line:
 
 ```
-pascal@archbook:~/$ cliche calculator.py add --help
+pascal@archbook:~/calc$ cliche install calc
+pascal@archbook:~/calc$ calc add --help
 
-usage: cliche add [-h] a b
+usage: calc add [-h] a b
 
 positional arguments:
   a           |int|
@@ -46,7 +48,7 @@ optional arguments:
 
 thus:
 
-    pascal@archbook:~/$ cliche calculator.py add 1 10
+    pascal@archbook:~/calc$ calc add 1 10
     11
 
 #### Advanced Example
@@ -75,13 +77,13 @@ Help:
 
 Calling it:
 
-    pascal@archbook:~/$ cliche calculator.py sum_or_multiply 1
+    pascal@archbook:~/calc$ calc sum_or_multiply 1
     10
 
-    pascal@archbook:~/$ cliche calculator.py sum_or_multiply --sum 1
+    pascal@archbook:~/calc$ calc sum_or_multiply --sum 1
     11
 
-    pascal@archbook:~/$ cliche calculator.py sum_or_multiply --b_number 3 2
+    pascal@archbook:~/calc$ calc sum_or_multiply --b_number 3 2
     6
 
 #### More examples
