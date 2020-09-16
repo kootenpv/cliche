@@ -8,16 +8,17 @@ Build a simple command-line interface from your functions.
 
 Features:
 
-- ✓ Least syntax required: you do not need to learn a "library" to use this
+- ✓ Least syntax required: you do not need to "learn a library" to use this
 - ✓ keeps it DRY (Don't Repeat yourself):
   - it uses all information available like *annotations*, *default values* and *docstrings*... yet does not require them.
-- ✓ Just decorate a function with `@cli` - that is it - it can now be called as CLI but also remains usable by other functions
+- ✓ Just decorate a function with `@cli` - that is it - it can now be called as CLI but also remains usable by other functions (unlike the click library)
 - ✓ Works with booleans (flags) and lists (multiple args) automatically
-- ✓ Standing on the shoulders of giants (i.e. it uses argparse and learnings from others) -> lightweight
-- ✓ Outputs python objects to JSON (unless passing `--raw`)
-- ✓ Colorized output
+- ✓ Standing on the shoulders of giants (i.e. it uses argparse and learnings from others)
+- ✓ Prints returned python objects in JSON (unless passing `--raw`)
+- ✓ Colorized output automatically
+- ✓ Allows creating executable by using `cliche install <mycli>`
 - ✓ Creates shortcuts, e.g. a variable "long_option" will be usable like `--long-option` and `-l`
-- ✓ No external dependencies
+- ✓ No external dependencies -> lightweight
 
 ## Examples
 
@@ -73,11 +74,11 @@ Note that installing means that all `@cli` functions will be detected in the fol
 from cliche import cli
 
 @cli
-def add_or_mul(a_number: int, b_number: int = 10, sums: bool = False):
+def add_or_mul(a_number: int, b_number=10, sums=False):
     """ Adds or multiplies a and b
 
     :param a_number: the first one
-    :param b_number: This parameter seems to be
+    :param b_number: second one
     :param sums: Sums when true, otherwise multiply
     """
     if sums:
@@ -98,7 +99,7 @@ Calling it:
     pascal@archbook:~/calc$ calc add_or_mul --sum 1
     11
 
-    pascal@archbook:~/calc$ calc add_or_mul --b_number 3 2
+    pascal@archbook:~/calc$ calc add_or_mul 2 -b 3
     6
 
 #### More examples

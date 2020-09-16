@@ -1,9 +1,10 @@
 import time
 
 import sys
-from inspect import signature, currentframe
+from inspect import signature, currentframe, getmro
 import traceback
 from typing import List, Iterable, Set, Tuple, Union
+from cliche.using_underscore import UNDERSCORE_DETECTED
 from cliche.types import Choice
 from cliche.install import install, uninstall
 from cliche.argparser import (
@@ -12,6 +13,16 @@ from cliche.argparser import (
     add_arguments_to_command,
     add_command,
 )
+
+
+def get_class(f):
+    vals = vars(sys.modules[f.__module__])
+    for attr in f.__qualname__.split('.')[:-1]:
+        vals = vals[attr]
+    if isinstance(vals, dict):
+        return None
+    return vals
+
 
 # t1 = time.time()
 
@@ -35,7 +46,8 @@ def cli(fn):
         if "raw" in kwargs:
             raw = kwargs.pop("raw")
         try:
-            kwargs = {k.replace("-", "_"): v for k, v in kwargs.items()}
+            if not UNDERSCORE_DETECTED:
+                kwargs = {k.replace("-", "_"): v for k, v in kwargs.items()}
             if fn in pydantic_models:
                 for var_name in pydantic_models[fn]:
                     model, model_args = pydantic_models[fn][var_name]
@@ -61,8 +73,10 @@ def cli(fn):
                 warn(traceback.format_exception_only(type(e), e)[-1].strip().split(" ", 1)[1])
                 sys.exit(1)
 
-    fn_registry[fn.__name__.replace("_", "-")] = (decorated_fn, fn)
-
+    if UNDERSCORE_DETECTED:
+        fn_registry[fn.__name__] = (decorated_fn, fn)
+    else:
+        fn_registry[fn.__name__.replace("_", "-")] = (decorated_fn, fn)
     return fn
 
 
@@ -124,6 +138,9 @@ def main(exclude_module_names=None, *parser_args):
                 if x in fn.__module__:
                     fn_registry.pop(k)
 
+    import pdb
+
+    pdb.set_trace()
     parser = get_parser()
 
     if parser_args:
