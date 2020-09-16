@@ -2,6 +2,7 @@ import re
 import sys
 import argparse
 from cliche.docstring_to_help import parse_doc_params
+from cliche.using_underscore import UNDERSCORE_DETECTED
 
 pydantic_models = {}
 
@@ -84,7 +85,8 @@ def add_command(subparsers, fn_name, fn):
     doc_str = fn.__doc__ or ""
     desc = re.split("^ *Parameter|^ *Return|^ *Example|:param|\n\n", doc_str)[0].strip()
     desc = desc.replace("%", "%%")
-    cmd = subparsers.add_parser(fn_name.replace("_", "-"), help=desc, description=desc)
+    name = fn_name if UNDERSCORE_DETECTED else fn_name.replace("_", "-")
+    cmd = subparsers.add_parser(name, help=desc, description=desc)
     return cmd
 
 
@@ -98,7 +100,8 @@ def is_pydantic(class_type):
 def add_group(parser_cmd, model, fn, var_name, abbrevs):
     kwargs = []
     pydantic_models[fn] = {}
-    group = parser_cmd.add_argument_group(model.__name__.replace("_", "-"))
+    name = model.__name__ if UNDERSCORE_DETECTED else model.__name__.replace("_", "-")
+    group = parser_cmd.add_argument_group(name)
     for field_name, field in model.__fields__.items():
         kwargs.append(field_name)
         default = field.default if field.default is not None else "--1"
@@ -139,7 +142,7 @@ def get_var_names(var_name, abbrevs):
 
 def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, abbrevs):
     action = "store"
-    var_name = var_name.replace("_", "-")
+    var_name = var_name if UNDERSCORE_DETECTED else var_name.replace("_", "-")
     arg_desc = arg_desc.replace("%", "%%")
     if tp is bool:
         action = "store_true" if not default else "store_false"
