@@ -60,7 +60,7 @@ for cache_value in cache.values():
 
 
 def fallback():
-    for import_name in set(function_to_imports.values()):
+    for import_name in sorted(set(function_to_imports.values())):
         __import__(import_name)
     from cliche import main
 
