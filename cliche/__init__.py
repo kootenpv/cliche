@@ -12,6 +12,8 @@ from cliche.argparser import (
     pydantic_models,
     add_arguments_to_command,
     add_command,
+    get_var_name_and_default,
+    bool_inverted,
 )
 
 
@@ -24,9 +26,20 @@ def get_class(f):
     return vals
 
 
+def get_init(f):
+    cl = get_class(f)
+    if cl is None:
+        return None, None
+    for init_class in cl.__mro__:
+        init = getattr(init_class, "__init__")
+        if init is not None:
+            return init_class, init
+
+
 # t1 = time.time()
 
 fn_registry = {}
+fn_class_registry = {}
 main_called = []
 
 
@@ -66,7 +79,8 @@ def cli(fn):
                     except json.JSONDecodeError:
                         print(res)
         except Exception as e:
-            print(f"Fault while calling {fn.__name__}{signature(fn)} with the above arguments")
+            fname, sig = fn.__name__, signature(fn)
+            print("Fault while calling {}{} with the above arguments".format(fname, sig))
             if show_traceback:
                 raise
             else:
@@ -104,7 +118,19 @@ def get_parser():
         )
         for fn_name, (decorated_fn, fn) in fn_registry.items():
             cmd = add_command(subparsers, fn_name, fn)
-            add_arguments_to_command(cmd, fn)
+            abbrevs = None
+
+            # for methods defined on classes, add those args
+            init_class, init = get_init(fn)
+            if init is not None:
+                group_name = "INITIALIZE CLASS: {}()".format(init.__qualname__.split('.')[0])
+                group = cmd.add_argument_group(group_name)
+                var_names = [x for x in init.__code__.co_varnames if x not in ["self", "cls"]]
+                fn_class_registry[fn_name] = (init_class, var_names)
+                abbrevs = add_arguments_to_command(group, init, abbrevs)
+
+            add_arguments_to_command(cmd, fn, abbrevs)
+
     else:
         installer = subparsers.add_parser("install", help="Create CLI from folder")
         installer.add_argument('name', help='Name of the cli to create')
@@ -138,27 +164,37 @@ def main(exclude_module_names=None, *parser_args):
                 if x in fn.__module__:
                     fn_registry.pop(k)
 
-    import pdb
-
-    pdb.set_trace()
     parser = get_parser()
 
     if parser_args:
-        arguments = parser.parse_args(parser_args)
+        parsed_args = parser.parse_args(parser_args)
     else:
-        arguments = parser.parse_args()
+        parsed_args = parser.parse_args()
     cmd = None
     try:
-        cmd = arguments.command
+        cmd = parsed_args.command
     except AttributeError:
         warn("No commands have been registered.\n")
         parser.print_help()
         sys.exit(3)
-    kwargs = dict(arguments._get_kwargs())
+    kwargs = dict(parsed_args._get_kwargs())
     kwargs.pop("command")
+    for x in bool_inverted:
+        if x in kwargs:
+            # stripping "no-" from e.g. "--no-sums"
+            kwargs[x[3:]] = kwargs.pop(x)
     if cmd is None:
         parser.print_help()
     else:
         from cliche import fn_registry
 
-        fn_registry[cmd][0](*arguments._get_args(), **kwargs)
+        # test.... i think this is never filled, so lets try always with empty
+        # starargs = parsed_args._get_args()
+        starargs = []
+        if cmd in fn_class_registry:
+            init_class, init_varnames = fn_class_registry[cmd]
+            init_kwargs = {k: kwargs.pop(k) for k in init_varnames if k in kwargs}
+            # [k for k in init_varnames if k not in init_kwargs]
+            fn_registry[cmd][0](init_class(**init_kwargs), **kwargs)
+        else:
+            fn_registry[cmd][0](*starargs, **kwargs)

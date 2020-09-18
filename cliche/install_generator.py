@@ -35,7 +35,7 @@ for x in glob.glob("{{cwd}}/*.py") + glob.glob("{{cwd}}/**/*.py"):
     any_change = True
     with open(x) as f:
         contents = f.read()
-        functions = re.findall(r"@cli\ndef ([^( ]+)+", contents)
+        functions = re.findall(r"@cli *\n *def ([^( ]+)+", contents, re.M)
         cache[x] = {
             "mod_date": mod_date,
             "functions": functions,

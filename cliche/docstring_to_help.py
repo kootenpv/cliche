@@ -36,7 +36,12 @@ def parse_sphinx_param_descriptions(doc):
                 results[stack["fn"]] = "\n".join(stack["lines"])
             stack = {}
             if line.startswith(":param"):
-                fn_name = line.split(":")[1].split()[-1]
+                # e.g. :param name (str):
+                if re.search(r":param +[^ ]+ +[(]", line):
+                    fn_name = line.split(":")[1].split()[-2]
+                # e.g. :param name:
+                else:
+                    fn_name = line.split(":")[1].split()[-1]
                 stack = {"fn": fn_name, "lines": [line.split(":", 2)[2].strip()]}
         elif stack and line.strip():
             stack["lines"].append(line.strip())

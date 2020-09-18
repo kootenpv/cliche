@@ -7,5 +7,5 @@ class Choice:
             self.choices.append(None)
 
     def __repr__(self):
-        inner = ", ".join(f"{x!r}" for x in self.choices)
+        inner = ", ".join(repr(x) for x in self.choices)
         return f"Choice({inner})"

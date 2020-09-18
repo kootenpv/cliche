@@ -19,12 +19,12 @@ def add(a_number: int, b_number: int = 10):
 
 
 @cli
-def sum_or_multiply(a_number: int, b_number: int = 10, sums: bool = False):
+def sum_or_multiply(a_number: int, b_number: int = 10, sums: bool = True):
     """ Sums or multiplies a and b
 
     :param a_number: the first one
     :param b_number: This parameter seems to be
-    :param sums: Whether to sum or multiply
+    :param sums: When True, sums instead of multiply
     """
     if sums:
         print(a_number + b_number)

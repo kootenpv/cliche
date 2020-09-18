@@ -5,6 +5,7 @@ from cliche.docstring_to_help import parse_doc_params
 from cliche.using_underscore import UNDERSCORE_DETECTED
 
 pydantic_models = {}
+bool_inverted = set()
 
 
 class ColoredHelpOnErrorParser(argparse.ArgumentParser):
@@ -114,7 +115,7 @@ def add_group(parser_cmd, model, fn, var_name, abbrevs):
             pass
         if is_pydantic(tp):
             msg = (
-                f"Cannot use nested pydantic just yet:"
+                "Cannot use nested pydantic just yet:"
                 + f"property {var_name}.{field_name} of function {fn.__name__}"
             )
             raise ValueError(msg)
@@ -162,15 +163,21 @@ def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, ab
     parser_cmd.add_argument(*var_names, type=tp, nargs=nargs, default=default, help=arg_desc)
 
 
-def add_arguments_to_command(cmd, fn):
-    doc_str = fn.__doc__ or ""
+def get_var_name_and_default(fn):
     arg_count = fn.__code__.co_argcount
     defs = fn.__defaults__ or tuple()
     defaults = (("--1",) * arg_count + defs)[-arg_count:]
-    doc_params = parse_doc_params(doc_str)
-    abbrevs = ["-h"]
     for var_name, default in zip(fn.__code__.co_varnames, defaults):
-        default_help = f"Default: {default} | " if default != "--1" else ""
+        if var_name in ["self", "cls"]:
+            continue
+        yield var_name, default
+
+
+def add_arguments_to_command(cmd, fn, abbrevs=None):
+    doc_str = fn.__doc__ or ""
+    doc_params = parse_doc_params(doc_str)
+    abbrevs = abbrevs or ["-h"]
+    for var_name, default in get_var_name_and_default(fn):
         default_type = type(default) if default != "--1" and default is not None else None
         tp = fn.__annotations__.get(var_name, default_type or str)
         # List, Iterable, Set, Tuple
@@ -211,5 +218,17 @@ def add_arguments_to_command(cmd, fn):
             # raise ValueError(msg)
             add_group(cmd, tp, fn, var_name, abbrevs)
             continue
-        arg_desc = f"|{tp_name}| {default_help}" + doc_params.get(var_name, "")
+        doc_text = doc_params.get(var_name, "")
+        # changing the name to "no_X" in case the default is True for X, since we should set a flag to invert it
+        # e.g. --sums becomes --no-sums
+        if tp == bool and default == True:
+            var_name = "no_" + var_name
+            bool_inverted.add(var_name)
+            default = False
+            default_help = f"Default: {default} | " if default != "--1" else ""
+            default = True
+        else:
+            default_help = f"Default: {default} | " if default != "--1" else ""
+        arg_desc = f"|{tp_name}| {default_help}" + doc_text
         add_argument(cmd, tp, container_type, var_name, default, arg_desc, abbrevs)
+    return abbrevs
