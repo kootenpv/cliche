@@ -1,9 +1,10 @@
 import os
 import sys
+import platform
 from jinja2 import Template
 
 
-def install(name, **kwargs):
+def install(name, autocomplete=True, **kwargs):
     cliche_path = os.path.dirname(os.path.realpath(__file__))
     with open(sys.argv[0]) as f:
         first_line = f.read().split("\n")[0]
@@ -18,6 +19,10 @@ def install(name, **kwargs):
     with open(bin_name, "w") as f:
         f.write(template.render(cwd=cwd, bin_name=bin_name, first_line=first_line))
     os.system("chmod +x " + bin_name)
+    if autocomplete and platform.system() == "Linux":
+        os.system(
+            f"""echo 'eval "$({bin_path}/register-python-argcomplete {name})"' >> ~/.bashrc"""
+        )
 
 
 def uninstall(name, **kwargs):
@@ -35,3 +40,11 @@ def uninstall(name, **kwargs):
         os.remove(bin_name + ".cache")
     except FileNotFoundError:
         pass
+    if platform.system() == "Linux":
+        with open(os.path.expanduser("~/.bashrc")) as f:
+            inp = f.read()
+        autocomplete_line = f'register-python-argcomplete {name})"\n'
+        if autocomplete_line in inp:
+            inp = "\n".join([x for x in inp.split("\n") if autocomplete_line.strip() not in x])
+            with open(os.path.expanduser("~/.bashrc"), "w") as f:
+                f.write(inp)

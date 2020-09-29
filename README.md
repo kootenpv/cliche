@@ -66,7 +66,10 @@ We can undo this with
 
     cliche uninstall calc
 
-Note that installing means that all `@cli` functions will be detected in the folder, not just of a single file, even after installation. You only have to install once.
+Note that installing means that all `@cli` functions will be detected
+in the folder, not just of a single file, even after installation. You
+only have to install once, and on Linux it also adds autocompletion to
+your CLI if `argcomplete` has been installed.
 
 #### Advanced Example
 
@@ -109,7 +112,7 @@ Check the example files [here](https://github.com/kootenpv/cliche/tree/master/ex
 ## Comparison with other CLI generators
 
   - argparse: it is powerful, but you need a lot of code to construct an argparse CLI
-  - click: you need a lot of decorators to construct a CLI, and not obvious how to use it
+  - click: you need a lot of decorators to construct a CLI, and not obvious how to use it. It does not keep things DRY. Also, the annotated function is not usable.
   - hug (cli): connected to a whole web framework, but gets a lot right
   - python-fire: low set up, but annoying traces all the time / ugly design, does not show default values nor types
   - cleo: requires too much code/objects to construct

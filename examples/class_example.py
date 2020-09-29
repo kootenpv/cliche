@@ -11,6 +11,10 @@ class A:
         self.c = c
         self.d = d
 
+    @cli
+    def printer_a(self):
+        print(self.c, self.d)
+
 
 class B(A):
     @cli

@@ -4,6 +4,14 @@ import sys
 from inspect import signature, currentframe, getmro
 import traceback
 from typing import List, Iterable, Set, Tuple, Union
+
+try:
+    import argcomplete
+
+    ARGCOMPLETE_IMPORTED = True
+except ImportError:
+    ARGCOMPLETE_IMPORTED = False
+
 from cliche.using_underscore import UNDERSCORE_DETECTED
 from cliche.types import Choice
 from cliche.install import install, uninstall
@@ -134,6 +142,13 @@ def get_parser():
     else:
         installer = subparsers.add_parser("install", help="Create CLI from folder")
         installer.add_argument('name', help='Name of the cli to create')
+        installer.add_argument(
+            "-n",
+            '--no-autocomplete',
+            action="store_false",
+            help='Default: False | Whether to add autocomplete support',
+        )
+        bool_inverted.add("no_autocomplete")
         fn_registry["install"] = [install, install]
         uninstaller = subparsers.add_parser("uninstall", help="Delete CLI")
         uninstaller.add_argument('name', help='Name of the cli to remove')
@@ -165,6 +180,9 @@ def main(exclude_module_names=None, *parser_args):
                     fn_registry.pop(k)
 
     parser = get_parser()
+
+    if ARGCOMPLETE_IMPORTED:
+        argcomplete.autocomplete(parser)
 
     if parser_args:
         parsed_args = parser.parse_args(parser_args)
