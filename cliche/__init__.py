@@ -1,5 +1,5 @@
 import time
-
+import os
 import sys
 from inspect import signature, currentframe, getmro
 import traceback
@@ -102,6 +102,35 @@ def cli(fn):
     return fn
 
 
+def highlight(x):
+    return "\x1b[1;36m{}\x1b[0m".format(x)
+
+
+@cli
+def cliche(**kwargs):
+    """ Shows cliche and Python version information. """
+    sv = sys.version_info
+    version = "{}.{}.{}".format(sv.major, sv.minor, sv.micro)
+    installed = False
+    try:
+        with open(sys.argv[0]) as f:
+            installed = "__import__(function_to_imports[command])" in f.read()
+    except FileNotFoundError:
+        pass
+    autocomplete = False
+    try:
+        name = os.path.basename(sys.argv[0])
+        with open(os.path.expanduser("~/.bashrc")) as f:
+            autocomplete = f"register-python-argcomplete {name}" in f.read()
+    except FileNotFoundError:
+        pass
+    print("Executable:          ", highlight(sys.argv[0]))
+    print("Installed by cliche: ", highlight(installed))
+    print("Autocomplete enabled:", highlight(autocomplete), "(only possible on Linux)")
+    print("Python Interpreter:  ", highlight(sys.executable))
+    print("Python Version:      ", highlight(version))
+
+
 def get_parser():
     frame = currentframe().f_back
     module_doc = frame.f_code.co_consts[0]
@@ -124,7 +153,10 @@ def get_parser():
             default=False,
             help="Whether to prevent attempting to output as json",
         )
-        for fn_name, (decorated_fn, fn) in fn_registry.items():
+
+        for fn_name, (decorated_fn, fn) in sorted(
+            fn_registry.items(), key=lambda x: (x[0] == "cliche", x[0])
+        ):
             cmd = add_command(subparsers, fn_name, fn)
             abbrevs = None
 

@@ -31,7 +31,7 @@ def uninstall(name, **kwargs):
     with open(bin_name) as f:
         txt = f.read()
         if "from cliche" not in txt:
-            raise ValueError("This executable does not seem installed by cliche")
+            raise ValueError(f"The command {name!r} does not seem to have been installed by cliche")
     try:
         os.remove(bin_name)
     except FileNotFoundError:

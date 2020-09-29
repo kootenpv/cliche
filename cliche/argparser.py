@@ -37,7 +37,13 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                 # \x1b[ is the ANSI Control Sequence Introducer (CSI)
                 if color == self.color_dict["BLUE"]:
                     message = message.strip()
-                    message = message.replace("positional arguments:", "POSITIONAL ARGUMENTS:")
+                    if len(self.prog.split()) > 1:
+                        message = message.replace("positional arguments:", "POSITIONAL ARGUMENTS:")
+                    else:
+                        message = message.replace("positional arguments:", "COMMANDS:")
+                        message = re.sub(
+                            "COMMANDS:.  {[^}]+..", "COMMANDS:\n", message, flags=re.DOTALL
+                        )
                     message = message.replace("optional arguments:", "OPTIONAL ARGUMENTS:")
                     message = re.sub(
                         "^Usage: .+", "\x1b[" + color + "m" + r"\g<0>" + "\x1b[0m", message
