@@ -29,7 +29,10 @@ from cliche.argparser import (
 def get_class(f):
     vals = vars(sys.modules[f.__module__])
     for attr in f.__qualname__.split('.')[:-1]:
-        vals = vals[attr]
+        try:
+            vals = vals[attr]
+        except TypeError:
+            return None
     if isinstance(vals, dict):
         return None
     return vals
