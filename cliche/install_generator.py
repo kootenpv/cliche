@@ -13,7 +13,7 @@ new_cache = {}
 import sys
 
 file_path = "{{cwd}}"
-sys.path.append("{{cwd}}")
+sys.path.insert(0, file_path)
 
 new_cache = {}
 # cache filename should be dynamic
@@ -35,13 +35,16 @@ for x in glob.glob("{{cwd}}/*.py") + glob.glob("{{cwd}}/**/*.py"):
     any_change = True
     with open(x) as f:
         contents = f.read()
-        functions = re.findall(r"@cli *\n *def ([^( ]+)+", contents, re.M)
+        functions = re.findall(r"^ *@cli *\n *def ([^( ]+)+", contents, re.M)
+        version = re.findall("""^ *__version__ = ['"]([^'"]+)""", contents)
         cache[x] = {
             "mod_date": mod_date,
             "functions": functions,
             "filename": x,
             "import_name": x.replace(file_path, "").strip("/").replace("/", ".").replace(".py", ""),
         }
+        if version:
+            cache[x]["version_info"] = version[0]
         new_cache[x] = cache[x]
 
 if any_change:
@@ -50,21 +53,23 @@ if any_change:
         json.dump(cache, f)
 
 function_to_imports = {}
+version_info = None
 for cache_value in cache.values():
     import_name = cache_value["import_name"]
     functions = cache_value["functions"]
+    version_info = version_info or cache_value.get("version_info")
     if not functions:
         continue
     for function in functions:
         function_to_imports[function] = import_name
 
 
-def fallback():
+def fallback(version_info=None):
     for import_name in sorted(set(function_to_imports.values())):
         __import__(import_name)
     from cliche import main
 
-    main()
+    main(version_info=version_info)
 
 
 if len(sys.argv) > 1:
@@ -73,8 +78,8 @@ if len(sys.argv) > 1:
         __import__(function_to_imports[command])
         from cliche import main
 
-        main()
+        main(version_info=version_info)
     else:
-        fallback()
+        fallback(version_info=version_info)
 else:
-    fallback()
+    fallback(version_info=version_info)

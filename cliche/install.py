@@ -1,7 +1,7 @@
+import re
 import os
 import sys
 import platform
-from jinja2 import Template
 
 
 def install(name, autocomplete=True, **kwargs):
@@ -15,14 +15,17 @@ def install(name, autocomplete=True, **kwargs):
         raise FileExistsError(bin_name)
     template_path = os.path.join(cliche_path, "install_generator.py")
     with open(template_path) as f:
-        template = Template(f.read())
+        template = f.read()
     with open(bin_name, "w") as f:
-        f.write(template.render(cwd=cwd, bin_name=bin_name, first_line=first_line))
+        for k, v in {"cwd": cwd, "bin_name": bin_name, "first_line": first_line}.items():
+            template = re.sub("{{ *" + re.escape(k) + " *}}", v, template)
+        f.write(template)
     os.system("chmod +x " + bin_name)
     if autocomplete and platform.system() == "Linux":
         os.system(
             f"""echo 'eval "$({bin_path}/register-python-argcomplete {name})"' >> ~/.bashrc"""
         )
+        print("Note: for autocomplete to work, please reopen a terminal.")
 
 
 def uninstall(name, **kwargs):

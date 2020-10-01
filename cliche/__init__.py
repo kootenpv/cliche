@@ -1,6 +1,7 @@
-import time
+import re
 import os
 import sys
+import time
 from inspect import signature, currentframe, getmro
 import traceback
 from typing import List, Iterable, Set, Tuple, Union
@@ -49,6 +50,7 @@ def get_init(f):
 fn_registry = {}
 fn_class_registry = {}
 main_called = []
+version = []
 
 
 def warn(x):
@@ -61,11 +63,13 @@ def cli(fn):
 
     def decorated_fn(*args, **kwargs):
         show_traceback = False
-        output_json = False
+        raw = False
         if "traceback" in kwargs:
             show_traceback = kwargs.pop("traceback")
         if "raw" in kwargs:
             raw = kwargs.pop("raw")
+        if "cli" in kwargs:
+            kwargs.pop("cli")
         try:
             if not UNDERSCORE_DETECTED:
                 kwargs = {k.replace("-", "_"): v for k, v in kwargs.items()}
@@ -106,15 +110,16 @@ def highlight(x):
     return "\x1b[1;36m{}\x1b[0m".format(x)
 
 
-@cli
-def cliche(**kwargs):
-    """ Shows cliche and Python version information. """
+def cli_info(**kwargs):
+    """ Outputs CLI and Python version info and exit. """
     sv = sys.version_info
-    version = "{}.{}.{}".format(sv.major, sv.minor, sv.micro)
+    python_version = "{}.{}.{}".format(sv.major, sv.minor, sv.micro)
     installed = False
     try:
         with open(sys.argv[0]) as f:
-            installed = "__import__(function_to_imports[command])" in f.read()
+            txt = f.read()
+            installed = "__import__(function_to_imports[command])" in txt
+            file_path = re.findall('file_path = "(.+)"', txt)
     except FileNotFoundError:
         pass
     autocomplete = False
@@ -124,11 +129,68 @@ def cliche(**kwargs):
             autocomplete = f"register-python-argcomplete {name}" in f.read()
     except FileNotFoundError:
         pass
-    print("Executable:          ", highlight(sys.argv[0]))
+    v = f" (version {version[0]})" if version else ""
+    print("Executable:          ", highlight(name + v))
+    print("Executable path:     ", highlight(sys.argv[0]))
     print("Installed by cliche: ", highlight(installed))
+    if installed:
+        print("CLI directory:       ", highlight(file_path[0]))
     print("Autocomplete enabled:", highlight(autocomplete), "(only possible on Linux)")
+    print("Python Version:      ", highlight(python_version))
     print("Python Interpreter:  ", highlight(sys.executable))
-    print("Python Version:      ", highlight(version))
+
+
+def add_traceback(parser):
+    parser.add_argument(
+        "--traceback", "--tr", action="store_true", default=False, help="Show Python tracebacks",
+    )
+
+
+def add_raw(parser):
+    parser.add_argument(
+        "--raw", action="store_true", default=False, help="Prevent function output as JSON",
+    )
+
+
+def add_cli(parser):
+    parser.add_argument(
+        "--cli", action="store_true", default=False, help=cli_info.__doc__,
+    )
+
+
+def add_cliche_self_parser(parser):
+    subparsers = parser.add_subparsers(dest="command")
+    installer = subparsers.add_parser("install", help="Create CLI from folder")
+    installer.add_argument('name', help='Name of the cli to create')
+    installer.add_argument(
+        "-n",
+        '--no-autocomplete',
+        action="store_false",
+        help='Default: False | Whether to add autocomplete support',
+    )
+    bool_inverted.add("no_autocomplete")
+    fn_registry["install"] = [install, install]
+    uninstaller = subparsers.add_parser("uninstall", help="Delete CLI")
+    uninstaller.add_argument('name', help='Name of the cli to remove')
+    fn_registry["uninstall"] = [uninstall, uninstall]
+
+
+def add_class_arguments(cmd, fn, fn_name):
+    abbrevs = None
+    init_class, init = get_init(fn)
+    if init is not None:
+        group_name = "INITIALIZE CLASS: {}()".format(init.__qualname__.split('.')[0])
+        group = cmd.add_argument_group(group_name)
+        var_names = [x for x in init.__code__.co_varnames if x not in ["self", "cls"]]
+        fn_class_registry[fn_name] = (init_class, var_names)
+        abbrevs = add_arguments_to_command(group, init, abbrevs)
+    return abbrevs
+
+
+def add_optional_cliche_arguments(cmd):
+    group = cmd.add_argument_group("OPTIONAL CLI ARGUMENTS")
+    add_traceback(group)
+    add_raw(group)
 
 
 def get_parser():
@@ -136,60 +198,36 @@ def get_parser():
     module_doc = frame.f_code.co_consts[0]
     module_doc = module_doc if isinstance(module_doc, str) else None
     parser = ColoredHelpOnErrorParser(description=module_doc)
-    subparsers = parser.add_subparsers(dest="command")
 
     from cliche import fn_registry
 
     if fn_registry:
-        parser.add_argument(
-            "--traceback",
-            action="store_true",
-            default=False,
-            help="Whether to enable python tracebacks",
-        )
-        parser.add_argument(
-            "--raw",
-            action="store_true",
-            default=False,
-            help="Whether to prevent attempting to output as json",
-        )
+        add_cli(parser)
 
-        for fn_name, (decorated_fn, fn) in sorted(
-            fn_registry.items(), key=lambda x: (x[0] == "cliche", x[0])
-        ):
-            cmd = add_command(subparsers, fn_name, fn)
-            abbrevs = None
+        if len(fn_registry) == 1:
+            fn = list(fn_registry.values())[0][1]
+            add_arguments_to_command(parser, fn)
+        else:
+            subparsers = parser.add_subparsers(dest="command")
+            for fn_name, (decorated_fn, fn) in sorted(
+                fn_registry.items(), key=lambda x: (x[0] == "info", x[0])
+            ):
+                cmd = add_command(subparsers, fn_name, fn)
 
-            # for methods defined on classes, add those args
-            init_class, init = get_init(fn)
-            if init is not None:
-                group_name = "INITIALIZE CLASS: {}()".format(init.__qualname__.split('.')[0])
-                group = cmd.add_argument_group(group_name)
-                var_names = [x for x in init.__code__.co_varnames if x not in ["self", "cls"]]
-                fn_class_registry[fn_name] = (init_class, var_names)
-                abbrevs = add_arguments_to_command(group, init, abbrevs)
+                # for methods defined on classes, add those args
+                abbrevs = add_class_arguments(cmd, fn, fn_name)
 
-            add_arguments_to_command(cmd, fn, abbrevs)
+                add_arguments_to_command(cmd, fn, abbrevs)
+
+                add_optional_cliche_arguments(cmd)
 
     else:
-        installer = subparsers.add_parser("install", help="Create CLI from folder")
-        installer.add_argument('name', help='Name of the cli to create')
-        installer.add_argument(
-            "-n",
-            '--no-autocomplete',
-            action="store_false",
-            help='Default: False | Whether to add autocomplete support',
-        )
-        bool_inverted.add("no_autocomplete")
-        fn_registry["install"] = [install, install]
-        uninstaller = subparsers.add_parser("uninstall", help="Delete CLI")
-        uninstaller.add_argument('name', help='Name of the cli to remove')
-        fn_registry["uninstall"] = [uninstall, uninstall]
+        add_cliche_self_parser(parser)
 
     return parser
 
 
-def main(exclude_module_names=None, *parser_args):
+def main(exclude_module_names=None, version_info=None, *parser_args):
     if main_called:
         return
     main_called.append(True)
@@ -211,6 +249,13 @@ def main(exclude_module_names=None, *parser_args):
                 if x in fn.__module__:
                     fn_registry.pop(k)
 
+    if version_info is not None:
+        version.append(version_info)
+
+    if "--cli" in sys.argv:
+        cli_info()
+        sys.exit(0)
+
     parser = get_parser()
 
     if ARGCOMPLETE_IMPORTED:
@@ -224,11 +269,15 @@ def main(exclude_module_names=None, *parser_args):
     try:
         cmd = parsed_args.command
     except AttributeError:
-        warn("No commands have been registered.\n")
-        parser.print_help()
-        sys.exit(3)
+        if len(fn_registry) == 1:
+            cmd = list(fn_registry)[0]
+        else:
+            warn("No commands have been registered.\n")
+            parser.print_help()
+            sys.exit(3)
     kwargs = dict(parsed_args._get_kwargs())
-    kwargs.pop("command")
+    if "command" in kwargs:
+        kwargs.pop("command")
     for x in bool_inverted:
         if x in kwargs:
             # stripping "no-" from e.g. "--no-sums"
@@ -236,8 +285,6 @@ def main(exclude_module_names=None, *parser_args):
     if cmd is None:
         parser.print_help()
     else:
-        from cliche import fn_registry
-
         # test.... i think this is never filled, so lets try always with empty
         # starargs = parsed_args._get_args()
         starargs = []

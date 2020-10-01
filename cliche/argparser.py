@@ -38,11 +38,20 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                 if color == self.color_dict["BLUE"]:
                     message = message.strip()
                     if len(self.prog.split()) > 1:
-                        message = message.replace("positional arguments:", "POSITIONAL ARGUMENTS:")
+                        message = message.replace(
+                            "positional arguments:", "POSITIONAL (REQUIRED) ARGUMENTS:"
+                        )
                     else:
-                        message = message.replace("positional arguments:", "COMMANDS:")
+                        # remove the line that shows the possibl commands, like e.g.
+                        # {badd, print-item, add}
                         message = re.sub(
-                            "COMMANDS:.  {[^}]+..", "COMMANDS:\n", message, flags=re.DOTALL
+                            "positional arguments:.  {[^}]+..",
+                            "COMMANDS:\n",
+                            message,
+                            flags=re.DOTALL,
+                        )
+                        message = message.replace(
+                            "positional arguments:", "POSITIONAL (REQUIRED) ARGUMENTS:"
                         )
                     message = message.replace("optional arguments:", "OPTIONAL ARGUMENTS:")
                     message = re.sub(
@@ -217,6 +226,9 @@ def add_arguments_to_command(cmd, fn, abbrevs=None):
                 else:
                     tp_arg = "str"
                 tp_name = "1 or more of: " + tp_arg
+            elif tp == "str":
+                tp = str
+                tp_name = "str"
             else:
                 tp_name = tp.__name__
         if is_pydantic(tp):
