@@ -145,19 +145,29 @@ def cli_info(**kwargs):
 
 def add_traceback(parser):
     parser.add_argument(
-        "--traceback", "--tr", action="store_true", default=False, help="Show Python tracebacks",
+        "--traceback",
+        "--tr",
+        action="store_true",
+        default=False,
+        help="Show Python tracebacks",
     )
 
 
 def add_raw(parser):
     parser.add_argument(
-        "--raw", action="store_true", default=False, help="Prevent function output as JSON",
+        "--raw",
+        action="store_true",
+        default=False,
+        help="Prevent function output as JSON",
     )
 
 
 def add_cli(parser):
     parser.add_argument(
-        "--cli", action="store_true", default=False, help=cli_info.__doc__,
+        "--cli",
+        action="store_true",
+        default=False,
+        help=cli_info.__doc__,
     )
 
 
@@ -207,7 +217,8 @@ def get_parser():
     if fn_registry:
         add_cli(parser)
 
-        if len(fn_registry) == 1:
+        # if only one @cli and the second arg is not a command
+        if len(fn_registry) == 1 and (len(sys.argv) < 2 or sys.argv[1] not in fn_registry):
             fn = list(fn_registry.values())[0][1]
             add_arguments_to_command(parser, fn)
         else:
@@ -268,6 +279,7 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
         parsed_args = parser.parse_args(parser_args)
     else:
         parsed_args = parser.parse_args()
+
     cmd = None
     try:
         cmd = parsed_args.command
