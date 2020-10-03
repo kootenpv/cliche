@@ -3,7 +3,7 @@ from setuptools import setup
 
 MAJOR_VERSION = '0'
 MINOR_VERSION = '5'
-MICRO_VERSION = '24'
+MICRO_VERSION = '27'
 VERSION = "{}.{}.{}".format(MAJOR_VERSION, MINOR_VERSION, MICRO_VERSION)
 
 setup(
@@ -17,7 +17,7 @@ setup(
     license='MIT',
     packages=find_packages(),
     include_package_data=True,
-    install_requires=["argparse>=1.4.0"],
+    # install_requires=["argparse>=1.4.0"],
     classifiers=[
         'Environment :: Console',
         'Intended Audience :: Developers',
