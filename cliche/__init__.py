@@ -146,7 +146,6 @@ def cli_info(**kwargs):
 def add_traceback(parser):
     parser.add_argument(
         "--traceback",
-        "--tr",
         action="store_true",
         default=False,
         help="Show Python tracebacks",

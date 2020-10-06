@@ -56,9 +56,23 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                             "positional arguments:", "POSITIONAL (REQUIRED) ARGUMENTS:"
                         )
                     message = message.replace("optional arguments:", "OPTIONAL ARGUMENTS:")
-                    message = re.sub(
-                        "^Usage: .+", "\x1b[" + color + "m" + r"\g<0>" + "\x1b[0m", message
-                    )
+                    lines = message.split("\n")
+                    inds = 1
+                    for i in range(1, len(lines)):
+                        if re.search("^[A-Z]", lines[i]):
+                            break
+                        if re.search(" +([{]|[.][.][.])", lines[i]):
+                            lines[i] = None
+                        else:
+                            inds += 1
+                    lines = [
+                        "\x1b["
+                        + color
+                        + "m"
+                        + "\n".join([x for x in lines[:inds] if x is not None])
+                        + "\x1b[0m"
+                    ] + lines[inds:]
+                    message = "\n".join([x for x in lines if x is not None])
                     message = re.sub(
                         "Default:.[^|]+",
                         "\x1b[" + color + "m" + r"\g<0>" + "\x1b[0m",
@@ -69,7 +83,15 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                     message = re.sub(
                         reg, ", " + "\x1b[" + color + "m" + r"\g<1> " + "\x1b[0m", message
                     )
-                    for reg in ["\n  -h, --help", "\n +--[^ ]+", "\n  ? ? ? ? ? ?[a-z0-9A-Z_-]+"]:
+                    reg = "(\n *-[a-zA-Z]) ([A-Z_]+|[{][^}]+})"
+                    message = re.sub(reg, "\x1b[" + color + "m" + r"\g<1>" + "\x1b[0m", message)
+
+                    for reg in [
+                        "\n  -h, --help",
+                        "\n  {[^}]+}",
+                        "\n +--[^ ]+",
+                        "\n  {1,6}[a-z0-9A-Z_-]+",
+                    ]:
                         message = re.sub(reg, "\x1b[" + color + "m" + r"\g<0>" + "\x1b[0m", message)
                     file.write(message + "\n")
                 else:
@@ -234,7 +256,8 @@ def add_arguments_to_command(cmd, fn, abbrevs=None):
             except AttributeError:
                 pass
             if isinstance(tp, Choice):
-                tp_name = f"Choice[tp[0]]"
+                sub_name = getattr(tp[0], "__name__", type(tp[0]).__name__)
+                tp_name = f"Choice[{sub_name}]"
             elif container_type:
                 if tp.__args__ and "Union" in str(tp.__args__[0]):
                     # cannot cast
