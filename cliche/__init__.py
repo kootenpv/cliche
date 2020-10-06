@@ -14,8 +14,8 @@ except ImportError:
     ARGCOMPLETE_IMPORTED = False
 
 from cliche.using_underscore import UNDERSCORE_DETECTED
-from cliche.types import Choice
 from cliche.install import install, uninstall
+from cliche.choice import Choice, Enum
 from cliche.argparser import (
     ColoredHelpOnErrorParser,
     pydantic_models,

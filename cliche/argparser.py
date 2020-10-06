@@ -1,8 +1,10 @@
 import re
 import sys
 import argparse
+from enum import Enum
 from cliche.docstring_to_help import parse_doc_params
 from cliche.using_underscore import UNDERSCORE_DETECTED
+from cliche.choice import Enum, Choice, EnumAction
 
 pydantic_models = {}
 bool_inverted = set()
@@ -85,16 +87,15 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
         self.print_help(sys.stderr)
         self.exit(2, message)
 
+    #     def error(self, message):
+    #         # TODO: it actually now prints generic help but it should print the specific help of the subcommand
+    #         # print(sys.modules[cli.__module__].__doc__)
 
-#     def error(self, message):
-#         # TODO: it actually now prints generic help but it should print the specific help of the subcommand
-#         # print(sys.modules[cli.__module__].__doc__)
-
-#         message = message.replace(
-#             "unrecognized arguments", "unrecognized (too many positional) arguments"
-#         )
-#         warn(f"error: {message}")
-#         sys.exit(2)
+    #         message = message.replace(
+    #             "unrecognized arguments", "unrecognized (too many positional) arguments"
+    #         )
+    #         warn(f"error: {message}")
+    #         sys.exit(2)
 
 
 def add_command(subparsers, fn_name, fn):
@@ -157,7 +158,7 @@ def get_var_names(var_name, abbrevs):
 
 
 def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, abbrevs):
-    action = "store"
+    kwargs = {}
     var_name = var_name if UNDERSCORE_DETECTED else var_name.replace("_", "-")
     arg_desc = arg_desc.replace("%", "%%")
     if tp is bool:
@@ -165,6 +166,18 @@ def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, ab
         var_names = get_var_names("--" + var_name, abbrevs)
         parser_cmd.add_argument(*var_names, action=action, help=arg_desc)
         return
+    try:
+        if issubclass(tp, Enum):
+            kwargs["action"] = EnumAction
+            # txt = "|".join(tp.__members__)
+            # if len(txt) > 77:
+            #     txt = txt[:77] + "... "
+            # kwargs["metavar"] = txt
+    except TypeError:
+        pass
+    if isinstance(tp, Choice):
+        kwargs["choices"] = tp
+        tp = type(tp[0])
     nargs = None
     if default != "--1":
         var_name = "--" + var_name
@@ -175,7 +188,10 @@ def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, ab
         except AttributeError as e:
             pass
     var_names = get_var_names(var_name, abbrevs)
-    parser_cmd.add_argument(*var_names, type=tp, nargs=nargs, default=default, help=arg_desc)
+
+    parser_cmd.add_argument(
+        *var_names, type=tp, nargs=nargs, default=default, help=arg_desc, **kwargs
+    )
 
 
 def get_var_name_and_default(fn):
@@ -217,7 +233,9 @@ def add_arguments_to_command(cmd, fn, abbrevs=None):
                 container_type = tp._name in ["List", "Iterable", "Set", "Tuple"]
             except AttributeError:
                 pass
-            if container_type:
+            if isinstance(tp, Choice):
+                tp_name = f"Choice[tp[0]]"
+            elif container_type:
                 if tp.__args__ and "Union" in str(tp.__args__[0]):
                     # cannot cast
                     tp_arg = "str"
