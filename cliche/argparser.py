@@ -183,6 +183,13 @@ def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, ab
     kwargs = {}
     var_name = var_name if UNDERSCORE_DETECTED else var_name.replace("_", "-")
     arg_desc = arg_desc.replace("%", "%%")
+    nargs = None
+    if container_type:
+        try:
+            tp = tp.__args__[0]
+            nargs = "+"
+        except AttributeError as e:
+            pass
     if tp is bool:
         action = "store_true" if not default else "store_false"
         var_names = get_var_names("--" + var_name, abbrevs)
@@ -200,17 +207,9 @@ def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, ab
     if isinstance(tp, Choice):
         kwargs["choices"] = tp
         tp = type(tp[0])
-    nargs = None
     if default != "--1":
         var_name = "--" + var_name
-    if container_type:
-        try:
-            tp = tp.__args__[0]
-            nargs = "+"
-        except AttributeError as e:
-            pass
     var_names = get_var_names(var_name, abbrevs)
-
     parser_cmd.add_argument(
         *var_names, type=tp, nargs=nargs, default=default, help=arg_desc, **kwargs
     )

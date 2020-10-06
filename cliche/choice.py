@@ -10,11 +10,6 @@ class Choice(list):
     def __repr__(self):
         return f"{self.__class__.__name__}({super().__repr__()})"
 
-    def __call__(self, *args, **kwargs):
-        import pdb
-
-        pdb.set_trace()
-
 
 # credits: https://stackoverflow.com/a/60750535/1575066
 
@@ -40,14 +35,21 @@ class EnumAction(Action):
 
         self._enum = enum
 
-    def __call__(self, parser, namespace, values, option_string=None):
-        # Convert value back into an Enum
-        if values in self._enum.__members__:
-            enum = self._enum[values]
+    def lookup(self, value):
+        if value in self._enum.__members__:
+            enum = self._enum[value]
         else:
             try:
-                values = int(values)
+                value = int(value)
             except ValueError:
                 pass
-            enum = self._enum(values)
-        setattr(namespace, self.dest, enum)
+            enum = self._enum(value)
+        return enum
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        # Convert value back into an Enum
+        if isinstance(values, list):
+            result = [self.lookup(x) for x in values]
+        else:
+            result = self.lookup(x)
+        setattr(namespace, self.dest, result)
