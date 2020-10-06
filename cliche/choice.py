@@ -51,5 +51,5 @@ class EnumAction(Action):
         if isinstance(values, list):
             result = [self.lookup(x) for x in values]
         else:
-            result = self.lookup(x)
+            result = self.lookup(values)
         setattr(namespace, self.dest, result)
