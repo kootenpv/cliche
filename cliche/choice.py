@@ -2,13 +2,8 @@ from enum import Enum
 from argparse import Action
 
 
-class Choice(list):
-    def __init__(self, *args, **kwargs):
-        args = args if isinstance(args[0], (str, int)) else args[0]
-        super(Choice, self).__init__(args)
-
-    def __repr__(self):
-        return f"{self.__class__.__name__}({super().__repr__()})"
+def Choice(*args):
+    return Enum("Choice", args)
 
 
 # credits: https://stackoverflow.com/a/60750535/1575066

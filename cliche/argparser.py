@@ -1,10 +1,11 @@
 import re
 import sys
 import argparse
+from typing import Union
 from enum import Enum
 from cliche.docstring_to_help import parse_doc_params
 from cliche.using_underscore import UNDERSCORE_DETECTED
-from cliche.choice import Enum, Choice, EnumAction
+from cliche.choice import Enum, EnumAction
 
 pydantic_models = {}
 bool_inverted = set()
@@ -204,9 +205,6 @@ def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, ab
             # kwargs["metavar"] = txt
     except TypeError:
         pass
-    if isinstance(tp, Choice):
-        kwargs["choices"] = tp
-        tp = type(tp[0])
     if default != "--1":
         var_name = "--" + var_name
     var_names = get_var_names(var_name, abbrevs)
@@ -251,13 +249,12 @@ def add_arguments_to_command(cmd, fn, abbrevs=None):
                 tp = None
         else:
             try:
+                if getattr(tp, "__origin__") == Union:
+                    tp = tp.__args__[0]
                 container_type = tp._name in ["List", "Iterable", "Set", "Tuple"]
             except AttributeError:
                 pass
-            if isinstance(tp, Choice):
-                sub_name = getattr(tp[0], "__name__", type(tp[0]).__name__)
-                tp_name = f"Choice[{sub_name}]"
-            elif container_type:
+            if container_type:
                 if tp.__args__ and "Union" in str(tp.__args__[0]):
                     # cannot cast
                     tp_arg = "str"
