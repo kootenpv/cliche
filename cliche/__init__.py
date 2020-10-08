@@ -65,10 +65,10 @@ def cli(fn):
     # print(fn, time.time() - t1) # for debug
 
     def decorated_fn(*args, **kwargs):
-        show_traceback = False
+        no_traceback = False
         raw = False
-        if "traceback" in kwargs:
-            show_traceback = kwargs.pop("traceback")
+        if "notraceback" in kwargs:
+            no_traceback = kwargs.pop("notraceback")
         if "raw" in kwargs:
             raw = kwargs.pop("raw")
         if "cli" in kwargs:
@@ -96,11 +96,11 @@ def cli(fn):
         except Exception as e:
             fname, sig = fn.__name__, signature(fn)
             print("Fault while calling {}{} with the above arguments".format(fname, sig))
-            if show_traceback:
-                raise
-            else:
+            if no_traceback:
                 warn(traceback.format_exception_only(type(e), e)[-1].strip().split(" ", 1)[1])
                 sys.exit(1)
+            else:
+                raise
 
     if UNDERSCORE_DETECTED:
         fn_registry[fn.__name__] = (decorated_fn, fn)
@@ -145,10 +145,10 @@ def cli_info(**kwargs):
 
 def add_traceback(parser):
     parser.add_argument(
-        "--traceback",
+        "--notraceback",
         action="store_true",
         default=False,
-        help="Show Python tracebacks",
+        help="Omit showing Python tracebacks",
     )
 
 
