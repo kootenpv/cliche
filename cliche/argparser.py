@@ -188,9 +188,9 @@ def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, ab
     if container_type:
         try:
             tp = tp.__args__[0]
-            nargs = "+"
         except AttributeError as e:
             pass
+        nargs = "+"
     if tp is bool:
         action = "store_true" if not default else "store_false"
         var_names = get_var_names("--" + var_name, abbrevs)
@@ -241,12 +241,15 @@ def add_arguments_to_command(cmd, fn, abbrevs=None):
             if "typing" not in str(tp):
                 tp_args = ", ".join(set(type(x).__name__ for x in default)) or "str"
                 tp_name = "1 or more of: " + tp_args
-                tp = None
             else:
                 tp_args = ", ".join(x.__name__ for x in tp.__args__)
                 tp_name = "1 or more of: " + tp_args
-                # tp = type(value)
+            if len(default) > 1:
                 tp = None
+            elif default:
+                tp = type(default[0])
+            else:
+                tp = tp.__args__[0]
         else:
             try:
                 if getattr(tp, "__origin__") == Union:
@@ -263,6 +266,7 @@ def add_arguments_to_command(cmd, fn, abbrevs=None):
                 else:
                     tp_arg = "str"
                 tp_name = "1 or more of: " + tp_arg
+                tp = tp.__args__[0]
             elif tp == "str":
                 tp = str
                 tp_name = "str"
