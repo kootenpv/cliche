@@ -22,6 +22,13 @@ def install(name, autocomplete=True, **kwargs):
         f.write(template)
     os.system("chmod +x " + bin_name)
     if autocomplete and platform.system() == "Linux":
+        try:
+            import argcomplete
+        except ImportError:
+            print(
+                "Can't import argcomplete. either run with --no_autocomplete or install argcomplete"
+            )
+            raise
         os.system(
             f"""echo 'eval "$({bin_path}/register-python-argcomplete {name})"' >> ~/.bashrc"""
         )
