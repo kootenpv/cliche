@@ -248,8 +248,10 @@ def add_arguments_to_command(cmd, fn, abbrevs=None):
                 tp = None
             elif default:
                 tp = type(default[0])
-            else:
+            elif hasattr(tp, "__args__"):
                 tp = tp.__args__[0]
+            else:
+                tp = str
         else:
             try:
                 if getattr(tp, "__origin__") == Union:
