@@ -1,3 +1,6 @@
+__project__ = "cliche"
+__version__ = "0.6.37"
+
 import re
 import os
 import sys
@@ -136,6 +139,7 @@ def cli_info(**kwargs):
     print("Executable:          ", highlight(name + v))
     print("Executable path:     ", highlight(sys.argv[0]))
     print("Installed by cliche: ", highlight(installed))
+    print("Cliche version:      ", __version__)
     if installed:
         print("CLI directory:       ", highlight(file_path[0]))
     print("Autocomplete enabled:", highlight(autocomplete), "(only possible on Linux)")
