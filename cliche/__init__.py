@@ -117,7 +117,7 @@ def highlight(x):
 
 
 def cli_info(**kwargs):
-    """ Outputs CLI and Python version info and exit. """
+    """ Outputs CLI and Python version info and exits. """
     sv = sys.version_info
     python_version = "{}.{}.{}".format(sv.major, sv.minor, sv.micro)
     installed = False
@@ -139,7 +139,7 @@ def cli_info(**kwargs):
     print("Executable:          ", highlight(name + v))
     print("Executable path:     ", highlight(sys.argv[0]))
     print("Installed by cliche: ", highlight(installed))
-    print("Cliche version:      ", __version__)
+    print("Cliche version:      ", highlight(__version__))
     if installed:
         print("CLI directory:       ", highlight(file_path[0]))
     print("Autocomplete enabled:", highlight(autocomplete), "(only possible on Linux)")
@@ -176,7 +176,7 @@ def add_cli(parser):
 
 def add_cliche_self_parser(parser):
     subparsers = parser.add_subparsers(dest="command")
-    installer = subparsers.add_parser("install", help="Create CLI from folder")
+    installer = subparsers.add_parser("install", help="Create CLI from current folder")
     installer.add_argument('name', help='Name of the cli to create')
     installer.add_argument(
         "-n",
@@ -184,10 +184,11 @@ def add_cliche_self_parser(parser):
         action="store_false",
         help='Default: False | Whether to add autocomplete support',
     )
+    add_cli(parser)
     bool_inverted.add("no_autocomplete")
     fn_registry["install"] = [install, install]
     uninstaller = subparsers.add_parser("uninstall", help="Delete CLI")
-    uninstaller.add_argument('name', help='Name of the cli to remove')
+    uninstaller.add_argument('name', help='Name of the CLI to remove')
     fn_registry["uninstall"] = [uninstall, uninstall]
 
 
