@@ -1,9 +1,10 @@
 __project__ = "cliche"
-__version__ = "0.6.37"
+__version__ = "0.6.39"
 
 import re
 import os
 import sys
+import json
 import time
 from inspect import signature, currentframe, getmro
 import traceback
@@ -90,8 +91,6 @@ def cli(fn):
                 if raw:
                     print(res)
                 else:
-                    import json
-
                     try:
                         print(json.dumps(res, indent=4))
                     except json.JSONDecodeError:
@@ -138,8 +137,8 @@ def cli_info(**kwargs):
     v = f" (version {version[0]})" if version else ""
     print("Executable:          ", highlight(name + v))
     print("Executable path:     ", highlight(sys.argv[0]))
-    print("Installed by cliche: ", highlight(installed))
     print("Cliche version:      ", highlight(__version__))
+    print("Installed by cliche: ", highlight(installed))
     if installed:
         print("CLI directory:       ", highlight(file_path[0]))
     print("Autocomplete enabled:", highlight(autocomplete), "(only possible on Linux)")
@@ -225,6 +224,7 @@ def get_parser():
         if len(fn_registry) == 1 and (len(sys.argv) < 2 or sys.argv[1] not in fn_registry):
             fn = list(fn_registry.values())[0][1]
             add_arguments_to_command(parser, fn)
+            add_optional_cliche_arguments(parser)
         else:
             subparsers = parser.add_subparsers(dest="command")
             for fn_name, (decorated_fn, fn) in sorted(

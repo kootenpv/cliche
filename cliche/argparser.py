@@ -80,11 +80,11 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                         message,
                         flags=re.DOTALL,
                     )
-                    reg = ", (--[^ ]+) "
+                    reg = r", (--[^ ]+)"
                     message = re.sub(
                         reg, ", " + "\x1b[" + color + "m" + r"\g<1> " + "\x1b[0m", message
                     )
-                    reg = "(\n *-[a-zA-Z]) ([A-Z_]+|[{][^}]+})"
+                    reg = r"(\n *-[a-zA-Z]) ([A-Z_]+|[{][^}]+})( \[[A-Z0-9. ]+\])?"
                     message = re.sub(reg, "\x1b[" + color + "m" + r"\g<1>" + "\x1b[0m", message)
 
                     for reg in [
