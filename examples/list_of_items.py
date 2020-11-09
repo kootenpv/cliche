@@ -1,4 +1,4 @@
-from cliche import List, cli
+from cliche import List, cli, Set
 
 
 @cli
@@ -40,3 +40,15 @@ def e(a: int = 1, z: List[int] = None):
 def f(a: int, z: List[int] = None):
     """ Test pos argument and list typing with None as default """
     print(a, z)
+
+
+@cli
+def g(z: Set[str]):
+    """ Test set default """
+    print(z)
+
+
+@cli
+def h(z: Set[str] = set(["a"])):
+    """ Test set default """
+    print(z)

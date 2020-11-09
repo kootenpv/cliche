@@ -9,6 +9,8 @@ from cliche.choice import Enum, EnumAction
 
 pydantic_models = {}
 bool_inverted = set()
+CONTAINER_MAPPING = {"List": list, "Iterable": list, "Set": set, "Tuple": tuple}
+container_fn_name_to_type = {}
 
 
 class ColoredHelpOnErrorParser(argparse.ArgumentParser):
@@ -41,9 +43,7 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                 if color == self.color_dict["BLUE"]:
                     message = message.strip()
                     if len(self.prog.split()) > 1:
-                        message = message.replace(
-                            "positional arguments:", "POSITIONAL (REQUIRED) ARGUMENTS:"
-                        )
+                        message = message.replace("positional arguments:", "POSITIONAL ARGUMENTS:")
                     else:
                         # remove the line that shows the possibl commands, like e.g.
                         # {badd, print-item, add}
@@ -53,9 +53,7 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                             message,
                             flags=re.DOTALL,
                         )
-                        message = message.replace(
-                            "positional arguments:", "POSITIONAL (REQUIRED) ARGUMENTS:"
-                        )
+                        message = message.replace("positional arguments:", "POSITIONAL ARGUMENTS:")
                     message = message.replace("optional arguments:", "OPTIONAL ARGUMENTS:")
                     lines = message.split("\n")
                     inds = 1
@@ -149,7 +147,7 @@ def add_group(parser_cmd, model, fn, var_name, abbrevs):
         tp = field.type_
         container_type = tp in [list, set, tuple]
         try:
-            container_type = tp._name in ["List", "Iterable", "Set", "Tuple"]
+            container_type = CONTAINER_MAPPING.get(tp._name)
         except AttributeError:
             pass
         if is_pydantic(tp):
@@ -190,7 +188,7 @@ def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, ab
             tp = tp.__args__[0]
         except AttributeError as e:
             pass
-        nargs = "+"
+        nargs = "*"
     if tp is bool:
         action = "store_true" if not default else "store_false"
         var_names = get_var_names("--" + var_name, abbrevs)
@@ -208,6 +206,11 @@ def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, ab
     if default != "--1":
         var_name = "--" + var_name
     var_names = get_var_names(var_name, abbrevs)
+    if nargs == "*" and default == "--1":
+        default = container_type()
+    if container_type:
+        fn = parser_cmd.prog.split()[-1]
+        container_fn_name_to_type[(fn, var_name)] = container_type
     parser_cmd.add_argument(
         *var_names, type=tp, nargs=nargs, default=default, help=arg_desc, **kwargs
     )
@@ -247,7 +250,7 @@ def add_arguments_to_command(cmd, fn, abbrevs=None):
             if len(default) > 1:
                 tp = None
             elif default:
-                tp = type(default[0])
+                tp = type(list(default)[0])
             elif hasattr(tp, "__args__"):
                 tp = tp.__args__[0]
             else:
@@ -256,7 +259,7 @@ def add_arguments_to_command(cmd, fn, abbrevs=None):
             try:
                 if getattr(tp, "__origin__") == Union:
                     tp = tp.__args__[0]
-                container_type = tp._name in ["List", "Iterable", "Set", "Tuple"]
+                container_type = CONTAINER_MAPPING.get(tp._name)
             except AttributeError:
                 pass
             if container_type:
@@ -267,7 +270,7 @@ def add_arguments_to_command(cmd, fn, abbrevs=None):
                     tp_arg = tp.__args__[0].__name__
                 else:
                     tp_arg = "str"
-                tp_name = "1 or more of: " + tp_arg
+                tp_name = "0 or more of: " + tp_arg
                 tp = tp.__args__[0]
             elif tp == "str":
                 tp = str

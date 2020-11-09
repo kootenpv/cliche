@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.6.39"
+__version__ = "0.6.40"
 
 import re
 import os
@@ -27,6 +27,7 @@ from cliche.argparser import (
     add_command,
     get_var_name_and_default,
     bool_inverted,
+    container_fn_name_to_type,
 )
 
 
@@ -313,4 +314,8 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
             # [k for k in init_varnames if k not in init_kwargs]
             fn_registry[cmd][0](init_class(**init_kwargs), **kwargs)
         else:
+            for name, value in list(kwargs.items()):
+                for key in [(cmd, name), (cmd, "--" + name)]:
+                    if key in container_fn_name_to_type:
+                        kwargs[name] = container_fn_name_to_type[key](value)
             fn_registry[cmd][0](*starargs, **kwargs)
