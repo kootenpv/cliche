@@ -18,14 +18,14 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
     # color_dict is a class attribute, here we avoid compatibility
     # issues by attempting to override the __init__ method
     # RED : Error, GREEN : Okay, YELLOW : Warning, Blue: Help/Info
-    color_dict = {'RED': '1;31', 'GREEN': '1;32', 'YELLOW': '1;33', 'BLUE': '1;36'}
+    color_dict = {"RED": "1;31", "GREEN": "1;32", "YELLOW": "1;33", "BLUE": "1;36"}
     # only when called with `cliche`, not `python`
     module_name = False
 
     def print_help(self, file=None):
         if file is None:
             file = sys.stdout
-        self._print_message(self.format_help(), file, self.color_dict['BLUE'])
+        self._print_message(self.format_help(), file, self.color_dict["BLUE"])
 
     def _print_message(self, message, file=None, color=None):
         if message:
@@ -94,11 +94,11 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                         message = re.sub(reg, "\x1b[" + color + "m" + r"\g<0>" + "\x1b[0m", message)
                     file.write(message + "\n")
                 else:
-                    file.write('\x1b[' + color + 'm' + message.strip() + '\x1b[0m\n')
+                    file.write("\x1b[" + color + "m" + message.strip() + "\x1b[0m\n")
 
     def exit(self, status=0, message=None):
         if message:
-            self._print_message(message, sys.stderr, self.color_dict['RED'])
+            self._print_message(message, sys.stderr, self.color_dict["RED"])
         sys.exit(status)
 
     def error(self, message):
@@ -292,7 +292,13 @@ def add_arguments_to_command(cmd, fn, abbrevs=None):
             default_help = f"Default: {default} | " if default != "--1" else ""
             default = True
         else:
-            default_help = f"Default: {default} | " if default != "--1" else ""
+            if isinstance(default, Enum):
+                default_fmt = default.name
+            elif default == "--1":
+                default_fmt = ""
+            else:
+                default_fmt = default
+            default_help = f"Default: {default_fmt} | " if default != "--1" else ""
         arg_desc = f"|{tp_name}| {default_help}" + doc_text
         add_argument(cmd, tp, container_type, var_name, default, arg_desc, abbrevs)
     return abbrevs
