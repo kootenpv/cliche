@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.6.40"
+__version__ = "0.7.43"
 
 import re
 import os
