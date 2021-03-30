@@ -73,7 +73,7 @@ def fallback(version_info=None):
 
 
 if len(sys.argv) > 1:
-    command = sys.argv[1]
+    command = sys.argv[1].replace("-", "_")
     if command in function_to_imports:
         __import__(function_to_imports[command])
         from cliche import main
