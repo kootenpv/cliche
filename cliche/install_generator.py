@@ -20,7 +20,7 @@ new_cache = {}
 try:
     with open("{{bin_name}}.cache") as f:
         cache = json.load(f)
-except FileNotFoundError:
+except (FileNotFoundError, json.JSONDecodeError):
     cache = {}
 
 # this path should be dynamic
