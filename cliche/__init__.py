@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.7.45"
+__version__ = "0.7.46"
 
 import re
 import os
@@ -33,7 +33,7 @@ from cliche.argparser import (
 
 def get_class(f):
     vals = vars(sys.modules[f.__module__])
-    for attr in f.__qualname__.split('.')[:-1]:
+    for attr in f.__qualname__.split(".")[:-1]:
         try:
             vals = vals[attr]
         except TypeError:
@@ -177,18 +177,18 @@ def add_cli(parser):
 def add_cliche_self_parser(parser):
     subparsers = parser.add_subparsers(dest="command")
     installer = subparsers.add_parser("install", help="Create CLI from current folder")
-    installer.add_argument('name', help='Name of the cli to create')
+    installer.add_argument("name", help="Name of the cli to create")
     installer.add_argument(
         "-n",
-        '--no-autocomplete',
+        "--no-autocomplete",
         action="store_false",
-        help='Default: False | Whether to add autocomplete support',
+        help="Default: False | Whether to add autocomplete support",
     )
     add_cli(parser)
     bool_inverted.add("no_autocomplete")
     fn_registry["install"] = [install, install]
     uninstaller = subparsers.add_parser("uninstall", help="Delete CLI")
-    uninstaller.add_argument('name', help='Name of the CLI to remove')
+    uninstaller.add_argument("name", help="Name of the CLI to remove")
     fn_registry["uninstall"] = [uninstall, uninstall]
 
 
@@ -196,7 +196,7 @@ def add_class_arguments(cmd, fn, fn_name):
     abbrevs = None
     init_class, init = get_init(fn)
     if init is not None:
-        group_name = "INITIALIZE CLASS: {}()".format(init.__qualname__.split('.')[0])
+        group_name = "INITIALIZE CLASS: {}()".format(init.__qualname__.split(".")[0])
         group = cmd.add_argument_group(group_name)
         var_names = [x for x in init.__code__.co_varnames if x not in ["self", "cls"]]
         fn_class_registry[fn_name] = (init_class, var_names)
@@ -317,5 +317,6 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
             for name, value in list(kwargs.items()):
                 for key in [(cmd, name), (cmd, "--" + name)]:
                     if key in container_fn_name_to_type:
-                        kwargs[name] = container_fn_name_to_type[key](value)
+                        if value is not None:
+                            kwargs[name] = container_fn_name_to_type[key](value)
             fn_registry[cmd][0](*starargs, **kwargs)
