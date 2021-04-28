@@ -178,6 +178,13 @@ def get_var_names(var_name, abbrevs):
     return var_names
 
 
+def protobuf_tp_converter(tp):
+    def inner(x):
+        return tp.Value(x)
+
+    return inner
+
+
 def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, abbrevs):
     kwargs = {}
     var_name = var_name if UNDERSCORE_DETECTED else var_name.replace("_", "-")
@@ -211,6 +218,8 @@ def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, ab
     if container_type:
         fn = parser_cmd.prog.split()[-1]
         container_fn_name_to_type[(fn, var_name)] = container_type
+    if tp.__class__.__name__ == "EnumTypeWrapper":
+        tp = protobuf_tp_converter(tp)
     parser_cmd.add_argument(
         *var_names, type=tp, nargs=nargs, default=default, help=arg_desc, **kwargs
     )
@@ -275,6 +284,8 @@ def add_arguments_to_command(cmd, fn, abbrevs=None):
             elif tp == "str":
                 tp = str
                 tp_name = "str"
+            elif tp.__class__.__name__ == "EnumTypeWrapper":
+                tp_name = tp._enum_type.name
             else:
                 tp_name = tp.__name__
         if is_pydantic(tp):
