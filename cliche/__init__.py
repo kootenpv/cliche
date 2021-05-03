@@ -1,14 +1,16 @@
 __project__ = "cliche"
-__version__ = "0.7.47"
+__version__ = "0.7.48"
 
 import re
 import os
 import sys
+import code
 import json
 import time
 from inspect import signature, currentframe, getmro
 import traceback
 from typing import List, Iterable, Set, Tuple, Union
+
 
 try:
     import argcomplete
@@ -78,6 +80,8 @@ def cli(fn):
             raw = kwargs.pop("raw")
         if "cli" in kwargs:
             kwargs.pop("cli")
+        if "pdb" in kwargs:
+            kwargs.pop("pdb")
         try:
             if not UNDERSCORE_DETECTED:
                 kwargs = {k.replace("-", "_"): v for k, v in kwargs.items()}
@@ -156,6 +160,15 @@ def add_traceback(parser):
     )
 
 
+def add_pdb(parser):
+    parser.add_argument(
+        "--pdb",
+        action="store_true",
+        default=False,
+        help="Drop into pdb on error",
+    )
+
+
 def add_raw(parser):
     parser.add_argument(
         "--raw",
@@ -185,6 +198,7 @@ def add_cliche_self_parser(parser):
         help="Default: False | Whether to add autocomplete support",
     )
     add_cli(parser)
+    add_pdb(parser)
     bool_inverted.add("no_autocomplete")
     fn_registry["install"] = [install, install]
     uninstaller = subparsers.add_parser("uninstall", help="Delete CLI")
@@ -207,6 +221,7 @@ def add_class_arguments(cmd, fn, fn_name):
 def add_optional_cliche_arguments(cmd):
     group = cmd.add_argument_group("OPTIONAL CLI ARGUMENTS")
     add_traceback(group)
+    add_pdb(group)
     add_raw(group)
 
 
@@ -220,6 +235,7 @@ def get_parser():
 
     if fn_registry:
         add_cli(parser)
+        add_pdb(parser)
 
         # if only one @cli and the second arg is not a command
         if len(fn_registry) == 1 and (len(sys.argv) < 2 or sys.argv[1] not in fn_registry):
@@ -275,6 +291,11 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
         cli_info()
         sys.exit(0)
 
+    use_pdb = False
+    if "--pdb" in sys.argv:
+        sys.argv.remove("--pdb")
+        use_pdb = True
+
     parser = get_parser()
 
     if ARGCOMPLETE_IMPORTED:
@@ -305,18 +326,27 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
     if cmd is None:
         parser.print_help()
     else:
-        # test.... i think this is never filled, so lets try always with empty
-        # starargs = parsed_args._get_args()
-        starargs = []
-        if cmd in fn_class_registry:
-            init_class, init_varnames = fn_class_registry[cmd]
-            init_kwargs = {k: kwargs.pop(k) for k in init_varnames if k in kwargs}
-            # [k for k in init_varnames if k not in init_kwargs]
-            fn_registry[cmd][0](init_class(**init_kwargs), **kwargs)
-        else:
-            for name, value in list(kwargs.items()):
-                for key in [(cmd, name), (cmd, "--" + name)]:
-                    if key in container_fn_name_to_type:
-                        if value is not None:
-                            kwargs[name] = container_fn_name_to_type[key](value)
-            fn_registry[cmd][0](*starargs, **kwargs)
+        try:
+            # test.... i think this is never filled, so lets try always with empty
+            # starargs = parsed_args._get_args()
+            starargs = []
+            if cmd in fn_class_registry:
+                init_class, init_varnames = fn_class_registry[cmd]
+                init_kwargs = {k: kwargs.pop(k) for k in init_varnames if k in kwargs}
+                # [k for k in init_varnames if k not in init_kwargs]
+                fn_registry[cmd][0](init_class(**init_kwargs), **kwargs)
+            else:
+                for name, value in list(kwargs.items()):
+                    for key in [(cmd, name), (cmd, "--" + name)]:
+                        if key in container_fn_name_to_type:
+                            if value is not None:
+                                kwargs[name] = container_fn_name_to_type[key](value)
+                fn_registry[cmd][0](*starargs, **kwargs)
+        except:
+            if not use_pdb:
+                raise
+            import pdb
+
+            extype, value, tb = sys.exc_info()
+            traceback.print_exc()
+            pdb.post_mortem(tb)
