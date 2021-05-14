@@ -5,7 +5,7 @@ from typing import Union
 from enum import Enum
 from cliche.docstring_to_help import parse_doc_params
 from cliche.using_underscore import UNDERSCORE_DETECTED
-from cliche.choice import Enum, EnumAction
+from cliche.choice import EnumAction, ProtoEnumAction
 
 pydantic_models = {}
 bool_inverted = set()
@@ -202,7 +202,9 @@ def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, ab
         parser_cmd.add_argument(*var_names, action=action, help=arg_desc)
         return
     try:
-        if issubclass(tp, Enum):
+        if "EnumTypeWrapper" in str(tp):
+            kwargs["action"] = ProtoEnumAction
+        elif issubclass(tp, Enum):
             kwargs["action"] = EnumAction
             # txt = "|".join(tp.__members__)
             # if len(txt) > 77:
@@ -218,8 +220,6 @@ def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, ab
     if container_type:
         fn = parser_cmd.prog.split()[-1]
         container_fn_name_to_type[(fn, var_name)] = container_type
-    if tp.__class__.__name__ == "EnumTypeWrapper":
-        tp = protobuf_tp_converter(tp)
     parser_cmd.add_argument(
         *var_names, type=tp, nargs=nargs, default=default, help=arg_desc, **kwargs
     )
@@ -233,6 +233,32 @@ def get_var_name_and_default(fn):
         if var_name in ["self", "cls"]:
             continue
         yield var_name, default
+
+
+def optional_lookup(fn, tp):
+    sans_optional = tp.replace("Optional[", "").replace("]", "")
+    if tp in fn.lookup:
+        tp_name = tp
+        tp = fn.lookup[tp]
+    elif sans_optional in fn.lookup:
+        tp_name = sans_optional
+        tp = fn.lookup[sans_optional]
+    else:
+        tp_name = tp
+    return tp, tp_name
+
+
+def container_lookup(fn, tp, container_name):
+    sans_container = tp.replace(f"{container_name}[", "").replace("]", "").split(",")[0].strip()
+    if tp in fn.lookup:
+        tp_name = tp
+        tp = fn.lookup[tp]
+    elif sans_container in fn.lookup:
+        tp_name = sans_container
+        tp = fn.lookup[sans_container]
+    else:
+        tp_name = tp
+    return tp, tp_name
 
 
 def add_arguments_to_command(cmd, fn, abbrevs=None):
@@ -271,23 +297,32 @@ def add_arguments_to_command(cmd, fn, abbrevs=None):
                 container_type = CONTAINER_MAPPING.get(tp._name)
             except AttributeError:
                 pass
-            if container_type:
-                if tp.__args__ and "Union" in str(tp.__args__[0]):
-                    # cannot cast
-                    tp_arg = "str"
-                elif tp.__args__:
-                    tp_arg = tp.__args__[0].__name__
-                else:
-                    tp_arg = "str"
-                tp_name = "0 or more of: " + tp_arg
-                tp = tp.__args__[0]
-            elif tp == "str":
-                tp = str
-                tp_name = "str"
-            elif tp.__class__.__name__ == "EnumTypeWrapper":
-                tp_name = tp._enum_type.name
+            for container_name, container in CONTAINER_MAPPING.items():
+                if isinstance(tp, str) and container_name in tp:
+                    tp, tp_name = container_lookup(fn, tp, container_name)
+                    container_type = container
+                    break
             else:
-                tp_name = tp.__name__
+                if container_type:
+                    if tp.__args__ and "Union" in str(tp.__args__[0]):
+                        # cannot cast
+                        tp_arg = "str"
+                    elif tp.__args__:
+                        tp_arg = tp.__args__[0].__name__
+                    else:
+                        tp_arg = "str"
+                    tp_name = "0 or more of: " + tp_arg
+                    tp = tp.__args__[0]
+                elif tp == "str":
+                    tp = str
+                    tp_name = "str"
+                elif tp.__class__.__name__ == "EnumTypeWrapper":
+                    tp_name = tp._enum_type.name
+                elif hasattr(tp, "__name__"):
+                    tp_name = tp.__name__
+                else:
+                    tp, tp_name = optional_lookup(fn, tp)
+
         if is_pydantic(tp):
             # msg = f"Cannot use pydantic just yet, argument {var_name!r} (type {tp.__name__}) on cmd {cmd.prog!r}"
             # raise ValueError(msg)

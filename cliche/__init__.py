@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.7.48"
+__version__ = "0.7.49"
 
 import re
 import os
@@ -70,8 +70,11 @@ def warn(x):
 
 def cli(fn):
     # print(fn, time.time() - t1) # for debug
+    module = sys.modules[fn.__module__]
+    fn.lookup = {x: getattr(module, x) for x in dir(module) if not x.startswith("_")}
 
     def decorated_fn(*args, **kwargs):
+
         no_traceback = False
         raw = False
         if "notraceback" in kwargs:

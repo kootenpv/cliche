@@ -48,3 +48,34 @@ class EnumAction(Action):
         else:
             result = self.lookup(values)
         setattr(namespace, self.dest, result)
+
+
+class ProtoEnumAction(Action):
+    """
+    Argparse action for handling Protobuf Enums
+    """
+
+    def __init__(self, **kwargs):
+        # Pop off the type value
+        enum = kwargs.pop("type", None)
+
+        # Ensure an Enum subclass is provided
+        if enum is None:
+            raise ValueError("type must be assigned an Enum when using EnumAction")
+        # Generate choices from the Enum
+        kwargs.setdefault("choices", tuple(enum.keys()))
+
+        super(ProtoEnumAction, self).__init__(**kwargs)
+
+        self._enum = enum
+
+    def lookup(self, value):
+        return self._enum.Value(value)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        # Convert value back into an Enum
+        if isinstance(values, list):
+            result = [self.lookup(x) for x in values]
+        else:
+            result = self.lookup(values)
+        setattr(namespace, self.dest, result)
