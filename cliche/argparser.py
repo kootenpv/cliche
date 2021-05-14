@@ -236,7 +236,7 @@ def get_var_name_and_default(fn):
 
 
 def optional_lookup(fn, tp):
-    sans_optional = tp.replace("Optional[", "").replace("]", "")
+    sans_optional = tp.replace("Optional[", "")[:-1]
     if tp in fn.lookup:
         tp_name = tp
         tp = fn.lookup[tp]
@@ -244,12 +244,13 @@ def optional_lookup(fn, tp):
         tp_name = sans_optional
         tp = fn.lookup[sans_optional]
     else:
-        tp_name = tp
+        tp_name = sans_optional
+        tp = __builtins__.get(sans_optional, sans_optional)
     return tp, tp_name
 
 
 def container_lookup(fn, tp, container_name):
-    sans_container = tp.replace(f"{container_name}[", "").replace("]", "").split(",")[0].strip()
+    sans_container = tp.replace(f"{container_name}[", "")[:-1].split(",")[0].strip()
     if tp in fn.lookup:
         tp_name = tp
         tp = fn.lookup[tp]
@@ -257,7 +258,9 @@ def container_lookup(fn, tp, container_name):
         tp_name = sans_container
         tp = fn.lookup[sans_container]
     else:
-        tp_name = tp
+        tp_name = sans_container
+        tp = __builtins__.get(sans_container, sans_container)
+
     return tp, tp_name
 
 
