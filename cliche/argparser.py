@@ -235,33 +235,33 @@ def get_var_name_and_default(fn):
         yield var_name, default
 
 
-def optional_lookup(fn, tp):
-    sans_optional = tp.replace("Optional[", "")[:-1]
-    if tp in fn.lookup:
+def base_lookup(fn, tp, sans):
+    tp_ending = tuple(tp.split("."))
+    sans_ending = tuple(sans.split("."))
+    if tp_ending in fn.lookup:
         tp_name = tp
-        tp = fn.lookup[tp]
-    elif sans_optional in fn.lookup:
-        tp_name = sans_optional
-        tp = fn.lookup[sans_optional]
+        tp = fn.lookup[tp_ending]
+    elif sans_ending in fn.lookup:
+        tp_name = sans
+        tp = fn.lookup[sans_ending]
     else:
-        tp_name = sans_optional
-        tp = __builtins__.get(sans_optional, sans_optional)
+        tp_name = sans
+        tp = __builtins__.get(sans, sans)
     return tp, tp_name
+
+
+def optional_lookup(fn, tp):
+    sans_optional = tp.replace("Optional[", "")
+    if tp != sans_optional:  # strip ]
+        sans_optional = sans_optional[:-1]
+    return base_lookup(fn, tp, sans_optional)
 
 
 def container_lookup(fn, tp, container_name):
-    sans_container = tp.replace(f"{container_name}[", "")[:-1].split(",")[0].strip()
-    if tp in fn.lookup:
-        tp_name = tp
-        tp = fn.lookup[tp]
-    elif sans_container in fn.lookup:
-        tp_name = sans_container
-        tp = fn.lookup[sans_container]
-    else:
-        tp_name = sans_container
-        tp = __builtins__.get(sans_container, sans_container)
-
-    return tp, tp_name
+    sans_container = tp.replace(f"{container_name}[", "")
+    if tp != sans_container:  # strip ]
+        sans_container = sans_container[:-1].split(",")[0].strip()
+    return base_lookup(fn, tp, sans_container)
 
 
 def add_arguments_to_command(cmd, fn, abbrevs=None):

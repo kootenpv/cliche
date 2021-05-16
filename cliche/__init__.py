@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.7.49"
+__version__ = "0.7.51"
 
 import re
 import os
@@ -10,7 +10,7 @@ import time
 from inspect import signature, currentframe, getmro
 import traceback
 from typing import List, Iterable, Set, Tuple, Union
-
+from types import ModuleType
 
 try:
     import argcomplete
@@ -71,10 +71,21 @@ def warn(x):
 def cli(fn):
     # print(fn, time.time() - t1) # for debug
     module = sys.modules[fn.__module__]
-    fn.lookup = {x: getattr(module, x) for x in dir(module) if not x.startswith("_")}
+    fn.lookup = {}
+    for x in dir(module):
+        if x.startswith("_"):
+            continue
+        item = getattr(module, x)
+        if isinstance(item, ModuleType):
+            sub_module = item
+            for y in dir(sub_module):
+                fn.lookup[(x, y)] = getattr(sub_module, y)
+                fn.lookup[(x, y + "Value")] = getattr(sub_module, y)
+        else:
+            fn.lookup[x] = getattr(module, x)
+            fn.lookup[x + "Value"] = getattr(module, x)
 
     def decorated_fn(*args, **kwargs):
-
         no_traceback = False
         raw = False
         if "notraceback" in kwargs:
