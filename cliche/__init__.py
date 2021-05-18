@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.7.51"
+__version__ = "0.7.52"
 
 import re
 import os
@@ -82,8 +82,8 @@ def cli(fn):
                 fn.lookup[(x, y)] = getattr(sub_module, y)
                 fn.lookup[(x, y + "Value")] = getattr(sub_module, y)
         else:
-            fn.lookup[x] = getattr(module, x)
-            fn.lookup[x + "Value"] = getattr(module, x)
+            fn.lookup[(x,)] = getattr(module, x)
+            fn.lookup[(x + "Value",)] = getattr(module, x)
 
     def decorated_fn(*args, **kwargs):
         no_traceback = False
