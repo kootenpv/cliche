@@ -1,16 +1,21 @@
 __project__ = "cliche"
-__version__ = "0.7.52"
+__version__ = "0.7.53"
+import time
+import sys
+
+if not getattr(sys, "cliche_ts__", False):
+    sys.cliche_ts__ = 0
 
 import re
 import os
-import sys
 import code
 import json
-import time
 from inspect import signature, currentframe, getmro
 import traceback
 from typing import List, Iterable, Set, Tuple, Union
 from types import ModuleType
+
+CLICHE_INIT_TS = time.time()
 
 try:
     import argcomplete
@@ -31,6 +36,9 @@ from cliche.argparser import (
     bool_inverted,
     container_fn_name_to_type,
 )
+
+CLICHE_AFTER_INIT_TS = time.time()
+loaded_modules_before = set(sys.modules)
 
 
 def get_class(f):
@@ -61,6 +69,15 @@ fn_registry = {}
 fn_class_registry = {}
 main_called = []
 version = []
+use_timing = False
+if "--timing" in sys.argv:
+    sys.argv.remove("--timing")
+    use_timing = True
+    print(
+        "timing cliche modules loading",
+        CLICHE_AFTER_INIT_TS - CLICHE_INIT_TS,
+    )
+    print("diff inits", CLICHE_AFTER_INIT_TS - sys.cliche_ts__)
 
 
 def warn(x):
@@ -70,6 +87,10 @@ def warn(x):
 
 def cli(fn):
     # print(fn, time.time() - t1) # for debug
+    current_modules = set(sys.modules)
+    new_modules = current_modules - loaded_modules_before
+    loaded_modules_before.update(current_modules)
+    t1 = time.time()
     module = sys.modules[fn.__module__]
     fn.lookup = {}
     for x in dir(module):
@@ -96,6 +117,8 @@ def cli(fn):
             kwargs.pop("cli")
         if "pdb" in kwargs:
             kwargs.pop("pdb")
+        if "timing" in kwargs:
+            kwargs.pop("timing")
         try:
             if not UNDERSCORE_DETECTED:
                 kwargs = {k.replace("-", "_"): v for k, v in kwargs.items()}
@@ -105,7 +128,10 @@ def cli(fn):
                     for m in model_args:
                         kwargs.pop(m)
                     kwargs[var_name] = model(**kwargs)
+            fn_time = time.time()
             res = fn(*args, **kwargs)
+            if use_timing:
+                print("timing fuction call success", time.time() - fn_time)
             if res is not None:
                 if raw:
                     print(res)
@@ -115,6 +141,8 @@ def cli(fn):
                     except json.JSONDecodeError:
                         print(res)
         except Exception as e:
+            if use_timing:
+                print("timing fuction call success", time.time() - fn_time)
             fname, sig = fn.__name__, signature(fn)
             print("Fault while calling {}{} with the above arguments".format(fname, sig))
             if no_traceback:
@@ -127,6 +155,24 @@ def cli(fn):
         fn_registry[fn.__name__] = (decorated_fn, fn)
     else:
         fn_registry[fn.__name__.replace("_", "-")] = (decorated_fn, fn)
+    if use_timing:
+        new_m = len(new_modules)
+        if new_m > 5:
+            new_module_text = f"({new_m} new_modules since last cli decoration)"
+        elif not new_modules:
+            new_module_text = "(no new modules loaded)"
+        else:
+            new_module_text = (
+                f"(loaded {', '.join(new_modules)} module(s) since last cli decoration)"
+            )
+        print(
+            "timing preparing",
+            fn.__name__,
+            time.time() - t1,
+            "since startup",
+            time.time() - CLICHE_INIT_TS,
+            new_module_text,
+        )
     return fn
 
 
@@ -135,7 +181,7 @@ def highlight(x):
 
 
 def cli_info(**kwargs):
-    """ Outputs CLI and Python version info and exits. """
+    """Outputs CLI and Python version info and exits."""
     sv = sys.version_info
     python_version = "{}.{}.{}".format(sv.major, sv.minor, sv.micro)
     installed = False
@@ -175,11 +221,24 @@ def add_traceback(parser):
 
 
 def add_pdb(parser):
+    if [x for x in parser._actions if "--pdb" in x.option_strings]:
+        return
     parser.add_argument(
         "--pdb",
         action="store_true",
         default=False,
         help="Drop into pdb on error",
+    )
+
+
+def add_timing(parser):
+    if [x for x in parser._actions if "--timing" in x.option_strings]:
+        return
+    parser.add_argument(
+        "--timing",
+        action="store_true",
+        default=False,
+        help="Add timings of cliche and function call",
     )
 
 
@@ -213,6 +272,7 @@ def add_cliche_self_parser(parser):
     )
     add_cli(parser)
     add_pdb(parser)
+    add_timing(parser)
     bool_inverted.add("no_autocomplete")
     fn_registry["install"] = [install, install]
     uninstaller = subparsers.add_parser("uninstall", help="Delete CLI")
@@ -235,7 +295,9 @@ def add_class_arguments(cmd, fn, fn_name):
 def add_optional_cliche_arguments(cmd):
     group = cmd.add_argument_group("OPTIONAL CLI ARGUMENTS")
     add_traceback(group)
+    add_cli(group)
     add_pdb(group)
+    add_timing(group)
     add_raw(group)
 
 
@@ -248,14 +310,11 @@ def get_parser():
     from cliche import fn_registry
 
     if fn_registry:
-        add_cli(parser)
-        add_pdb(parser)
-
+        add_optional_cliche_arguments(parser)
         # if only one @cli and the second arg is not a command
         if len(fn_registry) == 1 and (len(sys.argv) < 2 or sys.argv[1] not in fn_registry):
             fn = list(fn_registry.values())[0][1]
             add_arguments_to_command(parser, fn)
-            add_optional_cliche_arguments(parser)
         else:
             subparsers = parser.add_subparsers(dest="command")
             for fn_name, (decorated_fn, fn) in sorted(
@@ -268,8 +327,6 @@ def get_parser():
 
                 add_arguments_to_command(cmd, fn, abbrevs)
 
-                add_optional_cliche_arguments(cmd)
-
     else:
         add_cliche_self_parser(parser)
 
@@ -277,6 +334,7 @@ def get_parser():
 
 
 def main(exclude_module_names=None, version_info=None, *parser_args):
+    t1 = time.time()
     if main_called:
         return
     main_called.append(True)
@@ -320,6 +378,9 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
     else:
         parsed_args = parser.parse_args()
 
+    if use_timing:
+        print("timing arg parsing", time.time() - t1)
+
     cmd = None
     try:
         cmd = parsed_args.command
@@ -338,9 +399,13 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
             # stripping "no-" from e.g. "--no-sums"
             kwargs[x[3:]] = kwargs.pop(x)
     if cmd is None:
+        t2 = time.time()
         parser.print_help()
+        if use_timing:
+            print("timing print help", time.time() - t2)
     else:
         try:
+            t3 = time.time()
             # test.... i think this is never filled, so lets try always with empty
             # starargs = parsed_args._get_args()
             starargs = []
@@ -356,8 +421,12 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
                             if value is not None:
                                 kwargs[name] = container_fn_name_to_type[key](value)
                 fn_registry[cmd][0](*starargs, **kwargs)
+                if use_timing:
+                    print("timing fuction call success", time.time() - t3)
         except:
             if not use_pdb:
+                if use_timing:
+                    print("timing fuction call exception", time.time() - t3)
                 raise
             import pdb
 

@@ -2,15 +2,18 @@
 
 # the above should be dynamic
 import os
-import re
 import sys
+import re
+import time
 import json
 import glob
 
+sys.cliche_loaded_modules__ = set(sys.modules)
+sys.cliche_ts__ = time.time()
+use_timing = "--timing" in sys.argv
+
 any_change = False
 new_cache = {}
-
-import sys
 
 file_path = "{{cwd}}"
 sys.path.insert(0, file_path)
@@ -22,6 +25,9 @@ try:
         cache = json.load(f)
 except (FileNotFoundError, json.JSONDecodeError):
     cache = {}
+
+if use_timing:
+    print("timing cache load", time.time() - sys.cliche_ts__)
 
 # this path should be dynamic
 for x in glob.glob("{{cwd}}/*.py") + glob.glob("{{cwd}}/**/*.py"):
@@ -47,6 +53,9 @@ for x in glob.glob("{{cwd}}/*.py") + glob.glob("{{cwd}}/**/*.py"):
             cache[x]["version_info"] = version[0]
         new_cache[x] = cache[x]
 
+if use_timing:
+    print("timing cache build", time.time() - sys.cliche_ts__)
+
 if any_change:
     cache = new_cache
     with open("{{bin_name}}.cache", "w") as f:
@@ -63,10 +72,20 @@ for cache_value in cache.values():
     for function in functions:
         function_to_imports[function] = import_name
 
+if use_timing:
+    print("timing function build", time.time() - sys.cliche_ts__)
+
 
 def fallback(version_info=None):
+    if use_timing:
+        print("before imports", time.time() - sys.cliche_ts__)
     for import_name in sorted(set(function_to_imports.values())):
+        t1 = time.time()
         __import__(import_name)
+        if use_timing:
+            print("import time", import_name, time.time() - sys.cliche_ts__)
+    if use_timing:
+        print("before main import", time.time() - sys.cliche_ts__)
     from cliche import main
 
     main(version_info=version_info)
@@ -76,10 +95,19 @@ if len(sys.argv) > 1:
     command = sys.argv[1].replace("-", "_")
     if command in function_to_imports:
         __import__(function_to_imports[command])
+        if use_timing:
+            print("before main import", time.time() - sys.cliche_ts__)
         from cliche import main
 
         main(version_info=version_info)
     else:
+        if use_timing:
+            print("before fallback", time.time() - sys.cliche_ts__)
         fallback(version_info=version_info)
 else:
+    if use_timing:
+        print("before fallback", time.time() - sys.cliche_ts__)
     fallback(version_info=version_info)
+
+if use_timing:
+    print("kk", time.time() - sys.cliche_ts__)
