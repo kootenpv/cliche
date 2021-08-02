@@ -285,12 +285,12 @@ def add_arguments_to_command(cmd, fn, abbrevs=None):
             else:
                 tp_args = ", ".join(x.__name__ for x in tp.__args__)
                 tp_name = "1 or more of: " + tp_args
-            if len(default) > 1:
+            if hasattr(tp, "__args__"):
+                tp = tp.__args__[0]
+            elif len(set([type(x) for x in default])) > 1:
                 tp = None
             elif default:
                 tp = type(list(default)[0])
-            elif hasattr(tp, "__args__"):
-                tp = tp.__args__[0]
             else:
                 tp = str
         else:
