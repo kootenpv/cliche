@@ -20,7 +20,7 @@ def install(name, autocomplete=True, **kwargs):
         for k, v in {"cwd": cwd, "bin_name": bin_name, "first_line": first_line}.items():
             template = re.sub("{{ *" + re.escape(k) + " *}}", v, template)
         f.write(template)
-    os.system("chmod +x " + bin_name)
+    os.system(f'chmod +x "{bin_name}"')
     if autocomplete and platform.system() == "Linux":
         try:
             import argcomplete
