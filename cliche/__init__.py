@@ -105,6 +105,7 @@ def cli(fn):
         else:
             fn.lookup[(x,)] = getattr(module, x)
             fn.lookup[(x + "Value",)] = getattr(module, x)
+            fn.lookup[(x, "V")] = getattr(module, x)
 
     def decorated_fn(*args, **kwargs):
         no_traceback = False
@@ -162,9 +163,7 @@ def cli(fn):
         elif not new_modules:
             new_module_text = "(no new modules loaded)"
         else:
-            new_module_text = (
-                f"(loaded {', '.join(new_modules)} module(s) since last cli decoration)"
-            )
+            new_module_text = f"(loaded {', '.join(new_modules)} module(s) since last cli decoration)"
         print(
             "timing preparing",
             fn.__name__,
@@ -317,9 +316,7 @@ def get_parser():
             add_arguments_to_command(parser, fn)
         else:
             subparsers = parser.add_subparsers(dest="command")
-            for fn_name, (decorated_fn, fn) in sorted(
-                fn_registry.items(), key=lambda x: (x[0] == "info", x[0])
-            ):
+            for fn_name, (decorated_fn, fn) in sorted(fn_registry.items(), key=lambda x: (x[0] == "info", x[0])):
                 cmd = add_command(subparsers, fn_name, fn)
 
                 # for methods defined on classes, add those args
