@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.7.55"
+__version__ = "0.7.59"
 import time
 import sys
 
@@ -35,6 +35,7 @@ from cliche.argparser import (
     get_var_name_and_default,
     bool_inverted,
     container_fn_name_to_type,
+    class_init_lookup,
 )
 
 CLICHE_AFTER_INIT_TS = time.time()
@@ -93,6 +94,7 @@ def cli(fn):
     t1 = time.time()
     module = sys.modules[fn.__module__]
     fn.lookup = {}
+
     for x in dir(module):
         if x.startswith("_"):
             continue
@@ -106,6 +108,8 @@ def cli(fn):
             fn.lookup[(x,)] = getattr(module, x)
             fn.lookup[(x + "Value",)] = getattr(module, x)
             fn.lookup[(x, "V")] = getattr(module, x)
+        if "." in fn.__qualname__:
+            class_init_lookup[".".join(fn.__qualname__.split(".")[:-1]) + ".__init__"] = fn.lookup
 
     def decorated_fn(*args, **kwargs):
         no_traceback = False

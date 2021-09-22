@@ -11,6 +11,7 @@ pydantic_models = {}
 bool_inverted = set()
 CONTAINER_MAPPING = {"List": list, "Iterable": list, "Set": set, "Tuple": tuple}
 container_fn_name_to_type = {}
+class_init_lookup = {}  # for class functions
 
 
 class ColoredHelpOnErrorParser(argparse.ArgumentParser):
@@ -65,11 +66,7 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                         else:
                             inds += 1
                     lines = [
-                        "\x1b["
-                        + color
-                        + "m"
-                        + "\n".join([x for x in lines[:inds] if x is not None])
-                        + "\x1b[0m"
+                        "\x1b[" + color + "m" + "\n".join([x for x in lines[:inds] if x is not None]) + "\x1b[0m"
                     ] + lines[inds:]
                     message = "\n".join([x for x in lines if x is not None])
                     message = re.sub(
@@ -81,9 +78,7 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                     reg = r"(\n *-[a-zA-Z]) (.+, --)( \[[A-Z0-9. ]+\])?"
                     message = re.sub(reg, "\x1b[" + color + "m" + r"\g<1>" + "\x1b[0m, --", message)
                     reg = r", (--[^ ]+)"
-                    message = re.sub(
-                        reg, ", " + "\x1b[" + color + "m" + r"\g<1> " + "\x1b[0m", message
-                    )
+                    message = re.sub(reg, ", " + "\x1b[" + color + "m" + r"\g<1> " + "\x1b[0m", message)
 
                     for reg in [
                         "\n  -h, --help",
@@ -102,9 +97,7 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
         sys.exit(status)
 
     def error(self, message):
-        message = message.replace(
-            "unrecognized arguments", "unrecognized (too many positional) arguments"
-        )
+        message = message.replace("unrecognized arguments", "unrecognized (too many positional) arguments")
         self.print_help(sys.stderr)
         self.exit(2, message)
 
@@ -151,10 +144,7 @@ def add_group(parser_cmd, model, fn, var_name, abbrevs):
         except AttributeError:
             pass
         if is_pydantic(tp):
-            msg = (
-                "Cannot use nested pydantic just yet:"
-                + f"property {var_name}.{field_name} of function {fn.__name__}"
-            )
+            msg = "Cannot use nested pydantic just yet:" + f"property {var_name}.{field_name} of function {fn.__name__}"
             raise ValueError(msg)
         arg_desc = f"|{tp.__name__}| {default_help}"
         add_argument(group, tp, container_type, field_name, default, arg_desc, abbrevs)
@@ -220,9 +210,7 @@ def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, ab
     if container_type:
         fn = parser_cmd.prog.split()[-1]
         container_fn_name_to_type[(fn, var_name)] = container_type
-    parser_cmd.add_argument(
-        *var_names, type=tp, nargs=nargs, default=default, help=arg_desc, **kwargs
-    )
+    parser_cmd.add_argument(*var_names, type=tp, nargs=nargs, default=default, help=arg_desc, **kwargs)
 
 
 def get_var_name_and_default(fn):
@@ -238,6 +226,8 @@ def get_var_name_and_default(fn):
 def base_lookup(fn, tp, sans):
     tp_ending = tuple(tp.split("."))
     sans_ending = tuple(sans.split("."))
+    if fn.__qualname__ in class_init_lookup:
+        fn.lookup = class_init_lookup[fn.__qualname__]
     if tp_ending in fn.lookup:
         tp_name = tp
         tp = fn.lookup[tp_ending]
