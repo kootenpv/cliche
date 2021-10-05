@@ -10,6 +10,7 @@ from cliche.choice import EnumAction, ProtoEnumAction
 pydantic_models = {}
 bool_inverted = set()
 CONTAINER_MAPPING = {"List": list, "Iterable": list, "Set": set, "Tuple": tuple}
+CONTAINER_MAPPING.update({k.lower(): v for k, v in CONTAINER_MAPPING.items()})
 container_fn_name_to_type = {}
 class_init_lookup = {}  # for class functions
 
