@@ -64,6 +64,41 @@ def get_init(f):
             return init_class, init
 
 
+def highlight(x):
+    return "\x1b[1;36m{}\x1b[0m".format(x)
+
+
+def cli_info(**kwargs):
+    """Outputs CLI and Python version info and exits."""
+    sv = sys.version_info
+    python_version = "{}.{}.{}".format(sv.major, sv.minor, sv.micro)
+    installed = False
+    try:
+        with open(sys.argv[0]) as f:
+            txt = f.read()
+            installed = "__import__(function_to_imports[command])" in txt
+            file_path = re.findall('file_path = "(.+)"', txt)
+    except FileNotFoundError:
+        pass
+    autocomplete = False
+    try:
+        name = os.path.basename(sys.argv[0])
+        with open(os.path.expanduser("~/.bashrc")) as f:
+            autocomplete = f"register-python-argcomplete {name}" in f.read()
+    except FileNotFoundError:
+        pass
+    v = f" (version {version[0]})" if version else ""
+    print("Executable:          ", highlight(name + v))
+    print("Executable path:     ", highlight(sys.argv[0]))
+    print("Cliche version:      ", highlight(__version__))
+    print("Installed by cliche: ", highlight(installed))
+    if installed:
+        print("CLI directory:       ", highlight(file_path[0]))
+    print("Autocomplete enabled:", highlight(autocomplete), "(only possible on Linux)")
+    print("Python Version:      ", highlight(python_version))
+    print("Python Interpreter:  ", highlight(sys.executable))
+
+
 # t1 = time.time()
 
 fn_registry = {}
@@ -71,6 +106,10 @@ fn_class_registry = {}
 main_called = []
 version = []
 use_timing = False
+if "--cli" in sys.argv:
+    cli_info()
+    sys.exit(0)
+
 if "--timing" in sys.argv:
     sys.argv.remove("--timing")
     use_timing = True
@@ -177,41 +216,6 @@ def cli(fn):
             new_module_text,
         )
     return fn
-
-
-def highlight(x):
-    return "\x1b[1;36m{}\x1b[0m".format(x)
-
-
-def cli_info(**kwargs):
-    """Outputs CLI and Python version info and exits."""
-    sv = sys.version_info
-    python_version = "{}.{}.{}".format(sv.major, sv.minor, sv.micro)
-    installed = False
-    try:
-        with open(sys.argv[0]) as f:
-            txt = f.read()
-            installed = "__import__(function_to_imports[command])" in txt
-            file_path = re.findall('file_path = "(.+)"', txt)
-    except FileNotFoundError:
-        pass
-    autocomplete = False
-    try:
-        name = os.path.basename(sys.argv[0])
-        with open(os.path.expanduser("~/.bashrc")) as f:
-            autocomplete = f"register-python-argcomplete {name}" in f.read()
-    except FileNotFoundError:
-        pass
-    v = f" (version {version[0]})" if version else ""
-    print("Executable:          ", highlight(name + v))
-    print("Executable path:     ", highlight(sys.argv[0]))
-    print("Cliche version:      ", highlight(__version__))
-    print("Installed by cliche: ", highlight(installed))
-    if installed:
-        print("CLI directory:       ", highlight(file_path[0]))
-    print("Autocomplete enabled:", highlight(autocomplete), "(only possible on Linux)")
-    print("Python Version:      ", highlight(python_version))
-    print("Python Interpreter:  ", highlight(sys.executable))
 
 
 def add_traceback(parser):
@@ -359,10 +363,6 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
 
     if version_info is not None:
         version.append(version_info)
-
-    if "--cli" in sys.argv:
-        cli_info()
-        sys.exit(0)
 
     use_pdb = False
     if "--pdb" in sys.argv:
