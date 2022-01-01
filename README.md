@@ -32,7 +32,7 @@ from cliche import cli
 
 @cli
 def add(a: int, b: int):
-    print(a + b)
+    return a + b
 ```
 
 Now let's see how to use it from the command-line:

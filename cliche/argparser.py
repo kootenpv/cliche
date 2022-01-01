@@ -255,68 +255,71 @@ def container_lookup(fn, tp, container_name):
     return base_lookup(fn, tp, sans_container)
 
 
+def get_fn_info(fn, var_name, default):
+    default_type = type(default) if default != "--1" and default is not None else None
+    tp = fn.__annotations__.get(var_name, default_type or str)
+    # List, Iterable, Set, Tuple
+    container_type = False
+    found_result = True
+    tp_name = "bugggg"
+    found_result = default_type in [list, set, tuple]
+    if default_type in [list, set, tuple]:
+        container_type = default_type
+        if "typing" not in str(tp):
+            tp_args = ", ".join(set(type(x).__name__ for x in default)) or "str"
+            tp_name = "1 or more of: " + tp_args
+        else:
+            tp_args = ", ".join(x.__name__ for x in tp.__args__)
+            tp_name = "1 or more of: " + tp_args
+        if hasattr(tp, "__args__"):
+            tp = tp.__args__[0]
+        elif len(set([type(x) for x in default])) > 1:
+            tp = None
+        elif default:
+            tp = type(list(default)[0])
+        else:
+            found_result = False
+    if not found_result:
+        try:
+            if getattr(tp, "__origin__") == Union:
+                tp = tp.__args__[0]
+            container_type = CONTAINER_MAPPING.get(tp._name)
+        except AttributeError:
+            pass
+        for container_name, container in CONTAINER_MAPPING.items():
+            if isinstance(tp, str) and container_name in tp:
+                tp, tp_name = container_lookup(fn, tp, container_name)
+                container_type = container
+                break
+        else:
+            if container_type:
+                if tp.__args__ and "Union" in str(tp.__args__[0]):
+                    # cannot cast
+                    tp_arg = "str"
+                elif tp.__args__:
+                    tp_arg = tp.__args__[0].__name__
+                else:
+                    tp_arg = "str"
+                tp_name = "0 or more of: " + tp_arg
+                tp = tp.__args__[0]
+            elif tp == "str":
+                tp = str
+                tp_name = "str"
+            elif tp.__class__.__name__ == "EnumTypeWrapper":
+                tp_name = tp._enum_type.name
+            elif hasattr(tp, "__name__"):
+                tp_name = tp.__name__
+            else:
+                tp, tp_name = optional_lookup(fn, tp)
+    return tp, tp_name, default, container_type
+
+
 def add_arguments_to_command(cmd, fn, abbrevs=None):
     doc_str = fn.__doc__ or ""
     doc_params = parse_doc_params(doc_str)
     abbrevs = abbrevs or ["-h"]
     for var_name, default in get_var_name_and_default(fn):
-        default_type = type(default) if default != "--1" and default is not None else None
-        tp = fn.__annotations__.get(var_name, default_type or str)
-        # List, Iterable, Set, Tuple
-        container_type = False
-        if default_type in [list, set, tuple]:
-            for value in default:
-                break
-            else:
-                value = ""
-            container_type = default_type
-            if "typing" not in str(tp):
-                tp_args = ", ".join(set(type(x).__name__ for x in default)) or "str"
-                tp_name = "1 or more of: " + tp_args
-            else:
-                tp_args = ", ".join(x.__name__ for x in tp.__args__)
-                tp_name = "1 or more of: " + tp_args
-            if hasattr(tp, "__args__"):
-                tp = tp.__args__[0]
-            elif len(set([type(x) for x in default])) > 1:
-                tp = None
-            elif default:
-                tp = type(list(default)[0])
-            else:
-                tp = str
-        else:
-            try:
-                if getattr(tp, "__origin__") == Union:
-                    tp = tp.__args__[0]
-                container_type = CONTAINER_MAPPING.get(tp._name)
-            except AttributeError:
-                pass
-            for container_name, container in CONTAINER_MAPPING.items():
-                if isinstance(tp, str) and container_name in tp:
-                    tp, tp_name = container_lookup(fn, tp, container_name)
-                    container_type = container
-                    break
-            else:
-                if container_type:
-                    if tp.__args__ and "Union" in str(tp.__args__[0]):
-                        # cannot cast
-                        tp_arg = "str"
-                    elif tp.__args__:
-                        tp_arg = tp.__args__[0].__name__
-                    else:
-                        tp_arg = "str"
-                    tp_name = "0 or more of: " + tp_arg
-                    tp = tp.__args__[0]
-                elif tp == "str":
-                    tp = str
-                    tp_name = "str"
-                elif tp.__class__.__name__ == "EnumTypeWrapper":
-                    tp_name = tp._enum_type.name
-                elif hasattr(tp, "__name__"):
-                    tp_name = tp.__name__
-                else:
-                    tp, tp_name = optional_lookup(fn, tp)
-
+        tp, tp_name, default, container_type = get_fn_info(fn, var_name, default)
         if is_pydantic(tp):
             # msg = f"Cannot use pydantic just yet, argument {var_name!r} (type {tp.__name__}) on cmd {cmd.prog!r}"
             # raise ValueError(msg)
