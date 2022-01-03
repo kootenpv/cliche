@@ -293,15 +293,19 @@ def get_fn_info(fn, var_name, default):
                 break
         else:
             if container_type:
-                if tp.__args__ and "Union" in str(tp.__args__[0]):
-                    # cannot cast
+                if not hasattr(tp, "__args__"):
                     tp_arg = "str"
-                elif tp.__args__:
-                    tp_arg = tp.__args__[0].__name__
+                    tp = str
                 else:
-                    tp_arg = "str"
+                    if tp.__args__ and "Union" in str(tp.__args__[0]):
+                        # cannot cast
+                        tp_arg = "str"
+                    elif tp.__args__:
+                        tp_arg = tp.__args__[0].__name__
+                    else:
+                        tp_arg = "str"
+                    tp = tp.__args__[0]
                 tp_name = "0 or more of: " + tp_arg
-                tp = tp.__args__[0]
             elif tp == "str":
                 tp = str
                 tp_name = "str"
