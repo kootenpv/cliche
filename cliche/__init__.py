@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.7.63"
+__version__ = "0.7.64"
 import time
 import sys
 
@@ -182,7 +182,7 @@ def cli(fn):
                 else:
                     try:
                         print(json.dumps(res, indent=4))
-                    except json.JSONDecodeError:
+                    except (TypeError, json.JSONDecodeError):
                         print(res)
         except Exception as e:
             if use_timing:
