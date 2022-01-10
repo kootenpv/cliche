@@ -2,8 +2,8 @@ from setuptools import find_packages
 from setuptools import setup
 
 MAJOR_VERSION = "0"
-MINOR_VERSION = "7"
-MICRO_VERSION = "67"
+MINOR_VERSION = "8"
+MICRO_VERSION = "71"
 VERSION = "{}.{}.{}".format(MAJOR_VERSION, MINOR_VERSION, MICRO_VERSION)
 
 setup(
@@ -17,6 +17,7 @@ setup(
     license="MIT",
     packages=find_packages(),
     include_package_data=True,
+    install_requires=["ipdb == 0.13.9"],
     classifiers=[
         "Environment :: Console",
         "Intended Audience :: Developers",
