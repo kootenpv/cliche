@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.7.66"
+__version__ = "0.7.67"
 import time
 import sys
 
@@ -90,7 +90,7 @@ def cli_info(**kwargs):
     v = f" (version {version[0]})" if version else ""
     print("Executable:          ", highlight(name + v))
     print("Executable path:     ", highlight(sys.argv[0]))
-    print("Cache path:          ", highlight(sys.argv[0]) + ".cache")
+    print("Cache path:          ", highlight(sys.argv[0] + ".cache"))
     print("Cliche version:      ", highlight(__version__))
     print("Installed by cliche: ", highlight(installed))
     if installed:
