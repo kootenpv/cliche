@@ -30,7 +30,7 @@ if use_timing:
     print("timing cache load", time.time() - sys.cliche_ts__)
 
 # this path should be dynamic
-for x in glob.glob("{{cwd}}/*.py") + glob.glob("{{cwd}}/**/*.py"):
+for x in glob.glob(f"{file_path}/**/*.py", recursive=True):
     if any(e in x for e in ["#", "flycheck", "swp"]):
         continue
     mod_date = os.stat(x)[8]
