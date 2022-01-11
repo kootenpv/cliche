@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.7.71"
+__version__ = "0.8.72"
 import time
 import sys
 
@@ -431,7 +431,7 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
                     print("timing fuction call exception", time.time() - t3)
                 raise
             try:
-                import ipdb
+                import ipdb as pdb
             except ModuleNotFoundError:
                 import pdb
 
