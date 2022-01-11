@@ -98,19 +98,20 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
         sys.exit(status)
 
     def error(self, message):
-        message = message.replace("unrecognized arguments", "unrecognized (too many positional) arguments")
-        self.print_help(sys.stderr)
+        # otherwise it prints generic help but it should print the specific help of the subcommand
+        if "unrecognized arguments" in message:
+            multiple_args = message.count(" ") > 2
+            type_arg_msg = "Unknown optional argument" if "-" in message else "Extra positional argument"
+            if multiple_args:
+                type_arg_msg += "(s)"
+            message = message.replace("unrecognized arguments", type_arg_msg)
+            try:
+                self.parse_args(sys.argv[1:-1] + ["--help"])
+            except SystemExit:
+                pass
+        else:
+            self.print_help(sys.stderr)
         self.exit(2, message)
-
-    #     def error(self, message):
-    #         # TODO: it actually now prints generic help but it should print the specific help of the subcommand
-    #         # print(sys.modules[cli.__module__].__doc__)
-
-    #         message = message.replace(
-    #             "unrecognized arguments", "unrecognized (too many positional) arguments"
-    #         )
-    #         warn(f"error: {message}")
-    #         sys.exit(2)
 
 
 def add_command(subparsers, fn_name, fn):
