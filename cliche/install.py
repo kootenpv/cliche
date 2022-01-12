@@ -4,15 +4,16 @@ import sys
 import platform
 
 
-def install(name, autocomplete=True, **kwargs):
+def install(name, autocomplete=True, file_path=None, overwrite=False, **kwargs):
     cliche_path = os.path.dirname(os.path.realpath(__file__))
     with open(sys.argv[0]) as f:
         first_line = f.read().split("\n")[0]
-    cwd = os.getcwd()
+    cwd = file_path or os.getcwd()
     bin_path = os.path.dirname(sys.argv[0])
     bin_name = os.path.join(bin_path, name)
     if os.path.exists(bin_name):
-        raise FileExistsError(bin_name)
+        if not overwrite:
+            raise FileExistsError(bin_name)
     template_path = os.path.join(cliche_path, "install_generator.py")
     with open(template_path) as f:
         template = f.read()
@@ -25,13 +26,9 @@ def install(name, autocomplete=True, **kwargs):
         try:
             import argcomplete
         except ImportError:
-            print(
-                "Can't import argcomplete. either run with --no_autocomplete or install argcomplete"
-            )
+            print("Can't import argcomplete. either run with --no_autocomplete or install argcomplete")
             raise
-        os.system(
-            f"""echo 'eval "$({bin_path}/register-python-argcomplete {name})"' >> ~/.bashrc"""
-        )
+        os.system(f"""echo 'eval "$({bin_path}/register-python-argcomplete {name})"' >> ~/.bashrc""")
         print("Note: for autocomplete to work, please reopen a terminal.")
 
 
@@ -58,3 +55,13 @@ def uninstall(name, **kwargs):
             inp = "\n".join([x for x in inp.split("\n") if autocomplete_line.strip() not in x])
             with open(os.path.expanduser("~/.bashrc"), "w") as f:
                 f.write(inp)
+
+
+def runner():
+    import importlib
+
+    module_name = os.path.basename(sys.argv[0])
+    source_code_dir = os.path.dirname(importlib.util.find_spec(module_name).origin)
+    install(module_name, file_path=source_code_dir, overwrite=True)
+
+    os.execv(sys.argv[0], sys.argv)

@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.8.73"
+__version__ = "0.8.74"
 import time
 import sys
 
@@ -25,7 +25,7 @@ except ImportError:
     ARGCOMPLETE_IMPORTED = False
 
 from cliche.using_underscore import UNDERSCORE_DETECTED
-from cliche.install import install, uninstall
+from cliche.install import install, uninstall, runner
 from cliche.choice import Choice, Enum
 from cliche.argparser import (
     ColoredHelpOnErrorParser,
