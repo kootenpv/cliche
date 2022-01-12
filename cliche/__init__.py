@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.8.74"
+__version__ = "0.8.75"
 import time
 import sys
 
@@ -273,6 +273,12 @@ def add_cliche_self_parser(parser):
     installer = subparsers.add_parser("install", help="Create CLI from current folder")
     installer.add_argument("name", help="Name of the cli to create")
     installer.add_argument(
+        "-m",
+        "--module_dir",
+        default=None,
+        help="The root directory to search for functions (None defaults to current directory)",
+    )
+    installer.add_argument(
         "-n",
         "--no-autocomplete",
         action="store_false",
@@ -413,6 +419,7 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
             starargs = []
             if cmd in fn_class_registry:
                 init_class, init_varnames = fn_class_registry[cmd]
+                kwargs = {k.replace("-", "_"): v for k, v in kwargs.items()}
                 init_kwargs = {k: kwargs.pop(k) for k in init_varnames if k in kwargs}
                 # [k for k in init_varnames if k not in init_kwargs]
                 fn_registry[cmd][0](init_class(**init_kwargs), **kwargs)

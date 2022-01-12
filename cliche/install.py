@@ -4,11 +4,11 @@ import sys
 import platform
 
 
-def install(name, autocomplete=True, file_path=None, overwrite=False, **kwargs):
+def install(name, autocomplete=True, module_dir=None, overwrite=False, **kwargs):
     cliche_path = os.path.dirname(os.path.realpath(__file__))
     with open(sys.argv[0]) as f:
         first_line = f.read().split("\n")[0]
-    cwd = file_path or os.getcwd()
+    cwd = module_dir or os.getcwd()
     bin_path = os.path.dirname(sys.argv[0])
     bin_name = os.path.join(bin_path, name)
     if os.path.exists(bin_name):
