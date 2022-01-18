@@ -157,7 +157,10 @@ def get_var_names(var_name, abbrevs):
     # adds shortenings when possible
     if var_name.startswith("--"):
         short = "-" + var_name[2]
-        if short not in abbrevs:
+        # don't add shortening for inverted bools
+        if var_name.startswith("--no-") or var_name.startswith("--no_"):
+            var_names = [var_name]
+        elif short not in abbrevs:
             abbrevs.append(short)
             var_names = [short, var_name]
         elif short.upper() not in abbrevs:
