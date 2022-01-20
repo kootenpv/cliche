@@ -97,7 +97,7 @@ def fallback(version_info=None):
 if len(sys.argv) > 1:
     command_or_module = sys.argv[1].replace("-", "_")
     maybe_command = sys.argv[2].replace("-", "_") if len(sys.argv) > 2 else "-"
-    for key in [command_or_module, (command_or_module, maybe_command)]:
+    for key in [(command_or_module, maybe_command), command_or_module]:
         if key in function_to_imports:
             __import__(function_to_imports[key])
             if use_timing:
