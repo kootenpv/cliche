@@ -69,8 +69,11 @@ for cache_value in cache.values():
     version_info = version_info or cache_value.get("version_info")
     if not functions:
         continue
+    module_name = import_name.split(".")[-1]
     for function in functions:
         function_to_imports[function] = import_name
+        function_to_imports[(module_name, function)] = import_name
+        function_to_imports[module_name] = import_name
 
 if use_timing:
     print("timing function build", time.time() - sys.cliche_ts__)
@@ -92,14 +95,17 @@ def fallback(version_info=None):
 
 
 if len(sys.argv) > 1:
-    command = sys.argv[1].replace("-", "_")
-    if command in function_to_imports:
-        __import__(function_to_imports[command])
-        if use_timing:
-            print("before main import", time.time() - sys.cliche_ts__)
-        from cliche import main
+    command_or_module = sys.argv[1].replace("-", "_")
+    maybe_command = sys.argv[2].replace("-", "_") if len(sys.argv) > 2 else "-"
+    for key in [command_or_module, (command_or_module, maybe_command)]:
+        if key in function_to_imports:
+            __import__(function_to_imports[key])
+            if use_timing:
+                print("before main import", time.time() - sys.cliche_ts__)
+            from cliche import main
 
-        main(version_info=version_info)
+            main(version_info=version_info)
+            break
     else:
         if use_timing:
             print("before fallback", time.time() - sys.cliche_ts__)

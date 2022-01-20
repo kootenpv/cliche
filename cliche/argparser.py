@@ -42,6 +42,8 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                 file.write(message)
             else:
                 # \x1b[ is the ANSI Control Sequence Introducer (CSI)
+                if hasattr(self, "sub_command"):
+                    message = message.replace(self.prog, getattr(self, "sub_command"))
                 if color == self.color_dict["BLUE"]:
                     message = message.strip()
                     if len(self.prog.split()) > 1:
