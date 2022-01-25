@@ -21,7 +21,7 @@ sys.path.insert(0, file_path)
 new_cache = {}
 # cache filename should be dynamic
 try:
-    with open("{{bin_name}}.cache") as f:
+    with open("{{bin_name}}.json") as f:
         cache = json.load(f)
 except (FileNotFoundError, json.JSONDecodeError):
     cache = {}
@@ -41,14 +41,17 @@ for x in glob.glob(f"{file_path}/**/*.py", recursive=True):
     any_change = True
     with open(x) as f:
         contents = f.read()
-        functions = re.findall(r"^ *@cli *\n *def ([^( ]+)+", contents, re.M)
+        # functions = re.findall(r"^ *@cli *\n *def ([^( ]+)+", contents, re.M)
+        functions = re.findall(r"^ *@cli(?:\(.([a-zA-Z0-9_]+).\))? *\n *def ([^( ]+)+", contents, re.M)
         version = re.findall("""^ *__version__ = ['"]([^'"]+)""", contents)
+        module_name = x.replace(file_path, "").strip("/").replace("/", ".").replace(".py", "")
         cache[x] = {
             "mod_date": mod_date,
             "functions": functions,
             "filename": x,
-            "import_name": x.replace(file_path, "").strip("/").replace("/", ".").replace(".py", ""),
+            "import_name": module_name,
         }
+        # getattr(importlib.import_module(module_name), functions[0][1])
         if version:
             cache[x]["version_info"] = version[0]
         new_cache[x] = cache[x]
@@ -58,7 +61,7 @@ if use_timing:
 
 if any_change:
     cache = new_cache
-    with open("{{bin_name}}.cache", "w") as f:
+    with open("{{bin_name}}.json", "w") as f:
         json.dump(cache, f)
 
 function_to_imports = {}
@@ -70,10 +73,8 @@ for cache_value in cache.values():
     if not functions:
         continue
     module_name = import_name.split(".")[-1]
-    for function in functions:
-        function_to_imports[function] = import_name
-        function_to_imports[(module_name, function)] = import_name
-        function_to_imports[module_name] = import_name
+    for group, function in functions:
+        function_to_imports[(group, function)] = import_name
 
 if use_timing:
     print("timing function build", time.time() - sys.cliche_ts__)
@@ -95,9 +96,9 @@ def fallback(version_info=None):
 
 
 if len(sys.argv) > 1:
-    command_or_module = sys.argv[1].replace("-", "_")
-    maybe_command = sys.argv[2].replace("-", "_") if len(sys.argv) > 2 else "-"
-    for key in [(command_or_module, maybe_command), command_or_module]:
+    one = sys.argv[1].replace("-", "_")
+    two = sys.argv[2].replace("-", "_") if len(sys.argv) > 2 else "-"
+    for key in [(one, two), ("", one)]:
         if key in function_to_imports:
             __import__(function_to_imports[key])
             if use_timing:

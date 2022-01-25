@@ -44,7 +44,7 @@ def uninstall(name, **kwargs):
     except FileNotFoundError:
         pass
     try:
-        os.remove(bin_name + ".cache")
+        os.remove(bin_name + ".json")
     except FileNotFoundError:
         pass
     if platform.system() == "Linux":

@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.9.80"
+__version__ = "0.9.81"
 import time
 import sys
 
@@ -92,7 +92,7 @@ def cli_info(**kwargs):
     v = f" (version {version[0]})" if version else ""
     print("Executable:          ", highlight(name + v))
     print("Executable path:     ", highlight(sys.argv[0]))
-    print("Cache path:          ", highlight(sys.argv[0] + ".cache"))
+    print("Cache path:          ", highlight(sys.argv[0] + ".json"))
     print("Cliche version:      ", highlight(__version__))
     print("Installed by cliche: ", highlight(installed))
     if installed:
@@ -111,8 +111,10 @@ version = []
 use_timing = False
 fn_name_to_mod = defaultdict(set)  # issue 9
 module_count = defaultdict(int)  # issue 9
-module_parsers = {}
+group_parsers = {}
 old_sys_argv = sys.argv.copy()
+the_group = ""
+the_cmd = ""
 
 if "--cli" in sys.argv:
     cli_info()
@@ -133,7 +135,18 @@ def warn(x):
     sys.stderr.flush()
 
 
-def cli(fn):
+def cli(arg):
+    if callable(arg):
+        return inner_cli(arg)
+    else:
+
+        def d2(fn):
+            return inner_cli(fn, arg)
+
+        return d2
+
+
+def inner_cli(fn, group=""):
     # print(fn, time.time() - t1) # for debug
     current_modules = set(sys.modules)
     new_modules = current_modules - loaded_modules_before
@@ -203,13 +216,11 @@ def cli(fn):
             else:
                 raise
 
-    fn_name = fn.__module__ + "." + fn.__name__
-    fn_name_to_mod[fn.__name__].add(fn.__module__)
-    module_count[fn.__module__] += 1
+    fn_name = fn.__name__
     if UNDERSCORE_DETECTED:
-        fn_registry[fn_name] = (decorated_fn, fn)
+        fn_registry[(group, fn_name)] = (decorated_fn, fn)
     else:
-        fn_registry[fn_name] = (decorated_fn, fn)  # .replace("_", "-")
+        fn_registry[(group, fn_name)] = (decorated_fn, fn)  # .replace("_", "-")
     if use_timing:
         new_m = len(new_modules)
         if new_m > 5:
@@ -298,10 +309,10 @@ def add_cliche_self_parser(parser):
     add_pdb(parser)
     add_timing(parser)
     bool_inverted.add("no_autocomplete")
-    fn_registry["install"] = [install, install]
+    fn_registry[("", "install")] = [install, install]
     uninstaller = subparsers.add_parser("uninstall", help="Delete CLI")
     uninstaller.add_argument("name", help="Name of the CLI to remove")
-    fn_registry["uninstall"] = [uninstall, uninstall]
+    fn_registry[("", "uninstall")] = [uninstall, uninstall]
 
 
 def add_class_arguments(cmd, fn, fn_name):
@@ -326,6 +337,7 @@ def add_optional_cliche_arguments(cmd):
 
 
 def get_parser():
+    global the_group, the_cmd
     frame = currentframe().f_back
     module_doc = frame.f_code.co_consts[0]
     module_doc = module_doc if isinstance(module_doc, str) else None
@@ -335,56 +347,48 @@ def get_parser():
 
     if fn_registry:
         add_optional_cliche_arguments(parser)
+        groups = {group for group, fn_name in fn_registry}
+        fnames = {fn_name for group, fn_name in fn_registry}
+        possible_group = sys.argv[1] if len(sys.argv) > 1 else "-"
+        possible_cmd = sys.argv[2] if len(sys.argv) > 2 else "-"
         # if only one @cli and the second arg is not a command
-        if len(fn_registry) == 1 and (len(sys.argv) < 2 or sys.argv[1] not in fn_name_to_mod):
+        if len(fn_registry) == 1 and (len(sys.argv) < 2 or sys.argv[1] not in fnames):
             fn = list(fn_registry.values())[0][1]
+            add_arguments_to_command(parser, fn)
+            parser.add_argument("-q")
+        elif (possible_group, possible_cmd) in fn_registry:
+            del sys.argv[1]
+            del sys.argv[1]
+            the_group, the_cmd = possible_group, possible_cmd
+            decorated_fn, fn = fn_registry[(possible_group, possible_cmd)]
             add_arguments_to_command(parser, fn)
         else:
             subparsers = parser.add_subparsers(dest="command")
-            possible_sub = sys.argv[1] if len(sys.argv) > 1 else "-"
-            possible_cmd = sys.argv[2] if len(sys.argv) > 2 else "-"
             group_known = False
-            if (
-                possible_sub not in fn_name_to_mod
-                and not possible_sub.startswith("-")
-                and possible_cmd not in fn_name_to_mod
-            ):
-                for fn_name, v in fn_name_to_mod.items():
-                    for module_name in v:
-                        if possible_sub in module_name or possible_sub.replace("-", "_") in module_name:
-                            fn = getattr(sys.modules[module_name], fn_name)
-                            cmd = add_command(subparsers, fn_name, fn)
-                            ColoredHelpOnErrorParser.sub_command = possible_cmd
-                            group_known = True
+            if possible_group in groups:
+                for (fn_group, fn_name), (decorated_fn, fn) in fn_registry.items():
+                    if possible_group == fn_group:
+                        cmd = add_command(subparsers, fn_name, fn)
+                        ColoredHelpOnErrorParser.sub_command = possible_group
+                        group_known = True
             if subparsers is None:
                 subparsers = parser.add_subparsers(dest="command")
             if group_known:
                 del sys.argv[1]
             if not group_known:
-                for full_fn_name, (decorated_fn, fn) in sorted(
+                for (group, fn_name), (decorated_fn, fn) in sorted(
                     fn_registry.items(), key=lambda x: (x[0] == "info", x[0])
                 ):
-                    *mod_name, fn_name = full_fn_name.split(".")
-                    mod_name = ".".join(mod_name).replace("-", "_")
-                    mod_cmd_name = mod_name.split(".")[-1]
-                    if module_count[mod_name] == 1 or (len(sys.argv) > 1 and sys.argv[1].replace("-", "_") == fn_name):
+                    if not group:
                         cmd = add_command(subparsers, fn_name, fn)
-                    elif (
-                        len(sys.argv) > 1
-                        and mod_cmd_name == sys.argv[1]
-                        and not (len(sys.argv) > 2 and sys.argv[2] not in fn_name_to_mod)
-                    ):
-                        cmd = add_command(subparsers, fn_name, fn)
-                        if mod_cmd_name == sys.argv[1]:
-                            del sys.argv[1]
                     else:
-                        if mod_cmd_name not in module_parsers:
-                            mod_parser = subparsers.add_parser(mod_cmd_name, help="SUBCOMMAND")
-                            poop = mod_parser.add_subparsers()
-                            # module_parsers[mod_cmd_name] = mod_parser
-                            module_parsers[mod_cmd_name] = poop
-                        mod_cmd = module_parsers[mod_cmd_name]
-                        pooper = poop.add_parser(fn_name)
+                        if group not in group_parsers:
+                            mod_parser = subparsers.add_parser(group, help="SUBCOMMAND")
+                            group_parser = mod_parser.add_subparsers()
+                            group_parsers[group] = group_parser
+                        group_parser = group_parsers[group]
+                        group_fn = group_parser.add_parser(fn_name)
+                        group_fn.add_argument("-y")
                         continue
 
                     # for methods defined on classes, add those args
@@ -434,29 +438,18 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
     if ARGCOMPLETE_IMPORTED:
         argcomplete.autocomplete(parser)
 
+    group = ""
     tool_name = os.path.basename(sys.argv[0])
-    if len(sys.argv) > 1 and old_sys_argv[1] in fn_name_to_mod:
-        fn_name = old_sys_argv[1]
-        for module_name in fn_name_to_mod[fn_name]:
-            mod_count = module_count[module_name]
-            module_name = module_name.split(".")[-1]
-            if fn_name == module_name:
-                if mod_count > 1:
-                    warn(f"Module and fn_name are identical ({module_name}) so other functions are shadowed")
-
-                continue
-            bad = f"{tool_name} {fn_name}"
-            good = f"{tool_name} {module_name} {fn_name}"
-            warn(f"Better to call {good!r} instead of {bad!r}")
-
-            ColoredHelpOnErrorParser.sub_command = good
+    if the_group and the_cmd:
+        ColoredHelpOnErrorParser.sub_command = f"{tool_name} {the_group} {the_cmd}"
+        group = the_group
 
     elif old_sys_argv != sys.argv:
         if len(old_sys_argv) > 2 and old_sys_argv[2] in fn_name_to_mod:
-            name = " ".join(old_sys_argv[1:3])
+            group = " ".join(old_sys_argv[1:3])
         else:
-            name = old_sys_argv[1]
-        ColoredHelpOnErrorParser.sub_command = f"{tool_name} {name}"
+            group = old_sys_argv[1]
+        ColoredHelpOnErrorParser.sub_command = f"{tool_name} {group}"
 
     if parser_args:
         parsed_args = parser.parse_args(parser_args)
@@ -494,23 +487,20 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
             # test.... i think this is never filled, so lets try always with empty
             # starargs = parsed_args._get_args()
             starargs = []
+
             if cmd in fn_class_registry:
                 init_class, init_varnames = fn_class_registry[cmd]
                 kwargs = {k.replace("-", "_"): v for k, v in kwargs.items()}
                 init_kwargs = {k: kwargs.pop(k) for k in init_varnames if k in kwargs}
                 # [k for k in init_varnames if k not in init_kwargs]
-                fn_registry[cmd][0](init_class(**init_kwargs), **kwargs)
+                fn_registry[("", cmd)][0](init_class(**init_kwargs), **kwargs)
             else:
                 for name, value in list(kwargs.items()):
                     for key in [(cmd, name), (cmd, "--" + name)]:
                         if key in container_fn_name_to_type:
                             if value is not None:
                                 kwargs[name] = container_fn_name_to_type[key](value)
-                if cmd in fn_name_to_mod:
-                    if len(fn_name_to_mod[cmd]) > 1:
-                        raise ValueError(f"Uniqueness with modules {sys.argv}")
-                    cmd = list(fn_name_to_mod[cmd])[0] + "." + cmd
-                fn_registry[cmd][0](*starargs, **kwargs)
+                fn_registry[(group, cmd)][0](*starargs, **kwargs)
                 if use_timing:
                     print("timing fuction call success", time.time() - t3)
         except:
