@@ -3,7 +3,7 @@ from setuptools import setup
 
 MAJOR_VERSION = "0"
 MINOR_VERSION = "10"
-MICRO_VERSION = "82"
+MICRO_VERSION = "83"
 VERSION = "{}.{}.{}".format(MAJOR_VERSION, MINOR_VERSION, MICRO_VERSION)
 
 setup(

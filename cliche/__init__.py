@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.10.82"
+__version__ = "0.10.83"
 import time
 import sys
 
@@ -460,7 +460,7 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
         print("timing arg parsing", time.time() - t1)
 
     cmd = None
-    if the_cmd is not None:
+    if the_cmd:
         group, cmd = the_group, the_cmd
     else:
         try:
