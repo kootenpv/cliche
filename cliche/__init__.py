@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.9.81"
+__version__ = "0.10.82"
 import time
 import sys
 
@@ -349,8 +349,8 @@ def get_parser():
         add_optional_cliche_arguments(parser)
         groups = {group for group, fn_name in fn_registry}
         fnames = {fn_name for group, fn_name in fn_registry}
-        possible_group = sys.argv[1] if len(sys.argv) > 1 else "-"
-        possible_cmd = sys.argv[2] if len(sys.argv) > 2 else "-"
+        possible_group = sys.argv[1].replace("-", "_") if len(sys.argv) > 1 else "-"
+        possible_cmd = sys.argv[2].replace("-", "_") if len(sys.argv) > 2 else "-"
         # if only one @cli and the second arg is not a command
         if len(fn_registry) == 1 and (len(sys.argv) < 2 or sys.argv[1] not in fnames):
             fn = list(fn_registry.values())[0][1]
@@ -460,15 +460,18 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
         print("timing arg parsing", time.time() - t1)
 
     cmd = None
-    try:
-        cmd = parsed_args.command
-    except AttributeError:
-        if len(fn_registry) == 1:
-            cmd = list(fn_registry)[0]
-        else:
-            warn("No commands have been registered.\n")
-            parser.print_help()
-            sys.exit(3)
+    if the_cmd is not None:
+        group, cmd = the_group, the_cmd
+    else:
+        try:
+            cmd = parsed_args.command
+        except AttributeError:
+            if len(fn_registry) == 1:
+                cmd = list(fn_registry)[0]
+            else:
+                warn("No commands have been registered.\n")
+                parser.print_help()
+                sys.exit(3)
     kwargs = dict(parsed_args._get_kwargs())
     if "command" in kwargs:
         kwargs.pop("command")
