@@ -111,7 +111,6 @@ version = []
 use_timing = False
 fn_name_to_mod = defaultdict(set)  # issue 9
 module_count = defaultdict(int)  # issue 9
-group_parsers = {}
 old_sys_argv = sys.argv.copy()
 the_group = ""
 the_cmd = ""
@@ -355,7 +354,6 @@ def get_parser():
         if len(fn_registry) == 1 and (len(sys.argv) < 2 or sys.argv[1] not in fnames):
             fn = list(fn_registry.values())[0][1]
             add_arguments_to_command(parser, fn)
-            parser.add_argument("-q")
         elif (possible_group, possible_cmd) in fn_registry:
             del sys.argv[1]
             del sys.argv[1]
@@ -376,26 +374,22 @@ def get_parser():
             if group_known:
                 del sys.argv[1]
             if not group_known:
+                group_fn_names = defaultdict(list)
                 for (group, fn_name), (decorated_fn, fn) in sorted(
                     fn_registry.items(), key=lambda x: (x[0] == "info", x[0])
                 ):
-                    if not group:
-                        cmd = add_command(subparsers, fn_name, fn)
+                    if group:
+                        group_fn_names[group].append(fn_name)
                     else:
-                        if group not in group_parsers:
-                            mod_parser = subparsers.add_parser(group, help="SUBCOMMAND")
-                            group_parser = mod_parser.add_subparsers()
-                            group_parsers[group] = group_parser
-                        group_parser = group_parsers[group]
-                        group_fn = group_parser.add_parser(fn_name)
-                        group_fn.add_argument("-y")
-                        continue
-
-                    # for methods defined on classes, add those args
-                    abbrevs = add_class_arguments(cmd, fn, fn_name)
-
-                    add_arguments_to_command(cmd, fn, abbrevs)
-
+                        cmd = add_command(subparsers, fn_name, fn)
+                        # for methods defined on classes, add those args
+                        abbrevs = add_class_arguments(cmd, fn, fn_name)
+                        add_arguments_to_command(cmd, fn, abbrevs)
+                for group, fn_names in group_fn_names.items():
+                    mod_parser = subparsers.add_parser(group, help=f"SUBCOMMAND -> ({', '.join(sorted(fn_names))})")
+                    group_parser = mod_parser.add_subparsers()
+                    for fn_name in fn_names:
+                        group_parser.add_parser(fn_name)
     else:
         add_cliche_self_parser(parser)
 
