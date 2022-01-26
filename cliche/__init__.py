@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.10.90"
+__version__ = "0.10.91"
 import time
 import sys
 
@@ -109,7 +109,6 @@ fn_class_registry = {}
 main_called = []
 version = []
 use_timing = False
-fn_name_to_mod = defaultdict(set)  # issue 9
 module_count = defaultdict(int)  # issue 9
 old_sys_argv = sys.argv.copy()
 the_group = ""
@@ -352,14 +351,15 @@ def get_parser():
         possible_cmd = sys.argv[2].replace("-", "_") if len(sys.argv) > 2 else "-"
 
         # if only one @cli and the second arg is not a command
-        if len(fn_registry) == 1 and (len(sys.argv) < 2 or sys.argv[1].replace("-", "_") in fnames):
-            fn = list(fn_registry.values())[0][1]
-            add_arguments_to_command(parser, fn)
-        elif (possible_group, possible_cmd) in fn_registry:
-            del sys.argv[1]
-            del sys.argv[1]
+        if (possible_group, possible_cmd) in fn_registry:
+            # if len(sys.argv) == 3 or ("-h" in sys.argv or "--help" in sys.argv):
             the_group, the_cmd = possible_group, possible_cmd
+            del sys.argv[1]
+            del sys.argv[1]
             decorated_fn, fn = fn_registry[(possible_group, possible_cmd)]
+            add_arguments_to_command(parser, fn)
+        elif len(fn_registry) == 1 and (len(sys.argv) < 2 or sys.argv[1].replace("-", "_") not in fnames):
+            fn = list(fn_registry.values())[0][1]
             add_arguments_to_command(parser, fn)
         else:
             subparsers = parser.add_subparsers(dest="command")
@@ -440,10 +440,7 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
         group = the_group
 
     elif old_sys_argv != sys.argv:
-        if len(old_sys_argv) > 2 and old_sys_argv[2] in fn_name_to_mod:
-            group = " ".join(old_sys_argv[1:3])
-        else:
-            group = old_sys_argv[1]
+        group = old_sys_argv[1]
         ColoredHelpOnErrorParser.sub_command = f"{tool_name} {group}"
 
     if parser_args:
