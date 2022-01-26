@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.10.86"
+__version__ = "0.10.87"
 import time
 import sys
 
@@ -461,7 +461,7 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
             cmd = parsed_args.command
         except AttributeError:
             if len(fn_registry) == 1:
-                cmd = list(fn_registry)[0]
+                group, cmd = list(fn_registry)[0]
             else:
                 warn("No commands have been registered.\n")
                 parser.print_help()
