@@ -49,15 +49,24 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                     if len(self.prog.split()) > 1:
                         message = message.replace("positional arguments:", "POSITIONAL ARGUMENTS:")
                     else:
-                        # remove the line that shows the possibl commands, like e.g.
-                        # {badd, print-item, add}
-                        message = re.sub(
-                            "positional arguments:.  {[^}]+..",
-                            "COMMANDS:\n",
-                            message,
-                            flags=re.DOTALL,
-                        )
+                        # check if first is a positional arg or actual command
+                        ms = re.findall("positional arguments:.  {([^}]+)..", message, flags=re.DOTALL)
+                        if ms:
+                            ms = ms[0]
+                            first_start = message.index("positional arguments")
+                            start = first_start + message[first_start:].index(ms) + len(ms)
+                            end = message.index("optional ")
+                            if all([x in message[start:end] for x in ms.split(",")]):
+                                # remove the line that shows the possibl commands, like e.g.
+                                # {badd, print-item, add}
+                                message = re.sub(
+                                    "positional arguments:.  {[^ }]+..",
+                                    "COMMANDS:\n",
+                                    message,
+                                    flags=re.DOTALL,
+                                )
                         message = message.replace("positional arguments:", "POSITIONAL ARGUMENTS:")
+
                     message = message.replace("optional arguments:", "OPTIONAL ARGUMENTS:")
                     lines = message.split("\n")
                     inds = 1
