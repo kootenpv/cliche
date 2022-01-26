@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.10.89"
+__version__ = "0.10.90"
 import time
 import sys
 
@@ -350,8 +350,9 @@ def get_parser():
         fnames = {fn_name for group, fn_name in fn_registry}
         possible_group = sys.argv[1].replace("-", "_") if len(sys.argv) > 1 else "-"
         possible_cmd = sys.argv[2].replace("-", "_") if len(sys.argv) > 2 else "-"
+
         # if only one @cli and the second arg is not a command
-        if len(fn_registry) == 1 and (len(sys.argv) < 2 or sys.argv[1].replace("-", "_") not in fnames):
+        if len(fn_registry) == 1 and (len(sys.argv) < 2 or sys.argv[1].replace("-", "_") in fnames):
             fn = list(fn_registry.values())[0][1]
             add_arguments_to_command(parser, fn)
         elif (possible_group, possible_cmd) in fn_registry:
