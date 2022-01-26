@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.10.87"
+__version__ = "0.10.88"
 import time
 import sys
 
@@ -351,7 +351,7 @@ def get_parser():
         possible_group = sys.argv[1].replace("-", "_") if len(sys.argv) > 1 else "-"
         possible_cmd = sys.argv[2].replace("-", "_") if len(sys.argv) > 2 else "-"
         # if only one @cli and the second arg is not a command
-        if len(fn_registry) == 1 and (len(sys.argv) < 2 or sys.argv[1] not in fnames):
+        if len(fn_registry) == 1 and (len(sys.argv) < 2 or sys.argv[1].replace("-", "_") not in fnames):
             fn = list(fn_registry.values())[0][1]
             add_arguments_to_command(parser, fn)
         elif (possible_group, possible_cmd) in fn_registry:
@@ -466,6 +466,8 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
                 warn("No commands have been registered.\n")
                 parser.print_help()
                 sys.exit(3)
+    group, cmd = group.replace("-", "_"), cmd.replace("-", "_")
+
     kwargs = dict(parsed_args._get_kwargs())
     if "command" in kwargs:
         kwargs.pop("command")
