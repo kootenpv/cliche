@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.10.88"
+__version__ = "0.10.89"
 import time
 import sys
 
@@ -466,7 +466,6 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
                 warn("No commands have been registered.\n")
                 parser.print_help()
                 sys.exit(3)
-    group, cmd = group.replace("-", "_"), cmd.replace("-", "_")
 
     kwargs = dict(parsed_args._get_kwargs())
     if "command" in kwargs:
@@ -486,7 +485,7 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
             # test.... i think this is never filled, so lets try always with empty
             # starargs = parsed_args._get_args()
             starargs = []
-
+            group, cmd = group.replace("-", "_"), cmd.replace("-", "_")
             if cmd in fn_class_registry:
                 init_class, init_varnames = fn_class_registry[cmd]
                 kwargs = {k.replace("-", "_"): v for k, v in kwargs.items()}
