@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.10.83"
+__version__ = "0.10.86"
 import time
 import sys
 

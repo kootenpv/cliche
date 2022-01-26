@@ -29,6 +29,15 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
             file = sys.stdout
         self._print_message(self.format_help(), file, self.color_dict["BLUE"])
 
+    @staticmethod
+    def make_subgroups(message):
+        ind = message.find("SUBCOMMAND -> ")
+        if ind == -1:
+            return message
+        z = message[:ind].rfind("\n")
+        message = message[:z] + "\n\nSUBCOMMANDS:" + message[z:].replace("SUBCOMMAND -> ", "")
+        return message
+
     def _print_message(self, message, file=None, color=None):
         if message:
             message = message[0].upper() + message[1:]
@@ -66,6 +75,8 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                                     flags=re.DOTALL,
                                 )
                         message = message.replace("positional arguments:", "POSITIONAL ARGUMENTS:")
+
+                    message = self.make_subgroups(message)
 
                     message = message.replace("optional arguments:", "OPTIONAL ARGUMENTS:")
                     lines = message.split("\n")
