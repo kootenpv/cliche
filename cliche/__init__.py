@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.10.91"
+__version__ = "0.10.92"
 import time
 import sys
 
@@ -10,6 +10,7 @@ import re
 import os
 import code
 import json
+import asyncio
 from collections import defaultdict
 from inspect import signature, currentframe, getmro
 import traceback
@@ -192,7 +193,10 @@ def inner_cli(fn, group=""):
                         kwargs.pop(m)
                     kwargs[var_name] = model(**kwargs)
             fn_time = time.time()
-            res = fn(*args, **kwargs)
+            if asyncio.iscoroutinefunction(fn):
+                res = asyncio.run(fn(*args, **kwargs))
+            else:
+                res = fn(*args, **kwargs)
             if use_timing:
                 print("timing fuction call success", time.time() - fn_time)
             if res is not None:
