@@ -42,7 +42,7 @@ for x in glob.glob(f"{file_path}/**/*.py", recursive=True):
     with open(x) as f:
         contents = f.read()
         # functions = re.findall(r"^ *@cli *\n *def ([^( ]+)+", contents, re.M)
-        functions = re.findall(r"^ *@cli(?:\(.([a-zA-Z0-9_]+).\))? *\n *def ([^( ]+)+", contents, re.M)
+        functions = re.findall(r"^ *@cli(?:\(.([a-zA-Z0-9_]+).\))? *\n *(?:async )?def ([^( ]+)+", contents, re.M)
         version = re.findall("""^ *__version__ = ['"]([^'"]+)""", contents)
         module_name = x.replace(file_path, "").strip("/").replace("/", ".").replace(".py", "")
         cache[x] = {
