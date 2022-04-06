@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.10.93"
+__version__ = "0.10.95"
 import time
 import sys
 
@@ -39,6 +39,7 @@ from cliche.argparser import (
     bool_inverted,
     container_fn_name_to_type,
     class_init_lookup,
+    get_desc_str,
 )
 
 CLICHE_AFTER_INIT_TS = time.time()
@@ -362,6 +363,7 @@ def get_parser():
             del sys.argv[1]
             decorated_fn, fn = fn_registry[(possible_group, possible_cmd)]
             add_arguments_to_command(parser, fn)
+            parser.description = get_desc_str(fn)
         elif len(fn_registry) == 1 and (len(sys.argv) < 2 or sys.argv[1].replace("-", "_") not in fnames):
             fn = list(fn_registry.values())[0][1]
             add_arguments_to_command(parser, fn)

@@ -136,10 +136,15 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
         self.exit(2, message)
 
 
-def add_command(subparsers, fn_name, fn):
+def get_desc_str(fn):
     doc_str = fn.__doc__ or ""
     desc = re.split("^ *Parameter|^ *Return|^ *Example|:param|\n\n", doc_str)[0].strip()
     desc = desc.replace("%", "%%")
+    return desc[:1].upper() + desc[1:]
+
+
+def add_command(subparsers, fn_name, fn):
+    desc = get_desc_str(fn)
     name = fn_name if UNDERSCORE_DETECTED else fn_name.replace("_", "-")
     cmd = subparsers.add_parser(name, help=desc, description=desc)
     return cmd
