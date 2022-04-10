@@ -199,7 +199,7 @@ def inner_cli(fn, group=""):
             else:
                 res = fn(*args, **kwargs)
             if use_timing:
-                print("timing fuction call success", time.time() - fn_time)
+                print("timing function call success", time.time() - fn_time)
             if res is not None:
                 if raw:
                     print(res)
@@ -210,7 +210,7 @@ def inner_cli(fn, group=""):
                         print(res)
         except Exception as e:
             if use_timing:
-                print("timing fuction call success", time.time() - fn_time)
+                print("timing function call success", time.time() - fn_time)
             fn_name, sig = fn.__module__ + "." + fn.__name__, signature(fn)
             print("Fault while calling {}{} with the above arguments".format(fn_name, sig))
             if no_traceback:
@@ -504,11 +504,11 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
                                 kwargs[name] = container_fn_name_to_type[key](value)
                 fn_registry[(group, cmd)][0](*starargs, **kwargs)
                 if use_timing:
-                    print("timing fuction call success", time.time() - t3)
+                    print("timing function call success", time.time() - t3)
         except:
             if not use_pdb:
                 if use_timing:
-                    print("timing fuction call exception", time.time() - t3)
+                    print("timing function call exception", time.time() - t3)
                 raise
             try:
                 import ipdb as pdb
