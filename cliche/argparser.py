@@ -64,7 +64,7 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                             ms = ms[0]
                             first_start = message.index("positional arguments")
                             start = first_start + message[first_start:].index(ms) + len(ms)
-                            end = message.index("optional ")
+                            end = message.index("options")
                             if all([x in message[start:end] for x in ms.split(",")]):
                                 # remove the line that shows the possibl commands, like e.g.
                                 # {badd, print-item, add}
@@ -78,7 +78,7 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
 
                     message = self.make_subgroups(message)
 
-                    message = message.replace("optional arguments:", "OPTIONAL ARGUMENTS:")
+                    message = message.replace("options:", "OPTIONS:")
                     lines = message.split("\n")
                     inds = 1
                     for i in range(1, len(lines)):
@@ -123,7 +123,7 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
         # otherwise it prints generic help but it should print the specific help of the subcommand
         if "unrecognized arguments" in message:
             multiple_args = message.count(" ") > 2
-            type_arg_msg = "Unknown optional argument" if "-" in message else "Extra positional argument"
+            type_arg_msg = "Unknown option" if "-" in message else "Extra positional argument"
             if multiple_args:
                 type_arg_msg += "(s)"
             message = message.replace("unrecognized arguments", type_arg_msg)
