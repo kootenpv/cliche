@@ -14,6 +14,13 @@ CONTAINER_MAPPING.update({k.lower(): v for k, v in CONTAINER_MAPPING.items()})
 container_fn_name_to_type = {}
 class_init_lookup = {}  # for class functions
 
+def _check_options_usage(new, old):
+    import sys
+    if sys.version_info.major >= 3 and sys.version_info.minor >= 10:
+        return new
+    else:
+        return old
+
 
 class ColoredHelpOnErrorParser(argparse.ArgumentParser):
 
@@ -64,7 +71,7 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                             ms = ms[0]
                             first_start = message.index("positional arguments")
                             start = first_start + message[first_start:].index(ms) + len(ms)
-                            end = message.index("options")
+                            end = _check_options_usage(message.index("options"), message.index("optional"))
                             if all([x in message[start:end] for x in ms.split(",")]):
                                 # remove the line that shows the possibl commands, like e.g.
                                 # {badd, print-item, add}
@@ -78,7 +85,7 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
 
                     message = self.make_subgroups(message)
 
-                    message = message.replace("options:", "OPTIONS:")
+                    message = _check_options_usage( message.replace("options", "OPTIONS"), message.replace("optional arguments", "OPTIONAL ARGUMENTS"))
                     lines = message.split("\n")
                     inds = 1
                     for i in range(1, len(lines)):
@@ -123,7 +130,8 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
         # otherwise it prints generic help but it should print the specific help of the subcommand
         if "unrecognized arguments" in message:
             multiple_args = message.count(" ") > 2
-            type_arg_msg = "Unknown option" if "-" in message else "Extra positional argument"
+            option_str = _check_options_usage("Unknown option", "Unknown optional argument")
+            type_arg_msg = option_str if "-" in message else "Extra positional argument"
             if multiple_args:
                 type_arg_msg += "(s)"
             message = message.replace("unrecognized arguments", type_arg_msg)
