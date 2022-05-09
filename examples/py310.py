@@ -1,5 +1,4 @@
 from cliche import cli
-from typing import Optional
 
 
 @cli
