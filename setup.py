@@ -3,8 +3,8 @@ from setuptools import setup
 
 MAJOR_VERSION = "0"
 MINOR_VERSION = "10"
-MICRO_VERSION = "95"
-VERSION = "{}.{}.{}".format(MAJOR_VERSION, MINOR_VERSION, MICRO_VERSION)
+MICRO_VERSION = "96"
+VERSION = "{}.{}.{}s.format(MAJOR_VERSION, MINOR_VERSION, MICRO_VERSION)
 
 setup(
     name="cliche",
@@ -35,6 +35,8 @@ setup(
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
         "Topic :: Software Development",
         "Topic :: Software Development :: Build Tools",
         "Topic :: Software Development :: Debuggers",
