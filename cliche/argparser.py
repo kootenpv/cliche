@@ -14,13 +14,7 @@ CONTAINER_MAPPING.update({k.lower(): v for k, v in CONTAINER_MAPPING.items()})
 container_fn_name_to_type = {}
 class_init_lookup = {}  # for class functions
 
-def _check_py_version(new, old):
-    import sys
-    if sys.version_info.major >= 3 and sys.version_info.minor >= 10:
-        return new
-    else:
-        return old
-
+PYTHON_310_OR_HIGHER = sys.version_info >= (3,10)
 
 class ColoredHelpOnErrorParser(argparse.ArgumentParser):
 
@@ -71,7 +65,7 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                             ms = ms[0]
                             first_start = message.index("positional arguments")
                             start = first_start + message[first_start:].index(ms) + len(ms)
-                            end = _check_py_version(message.index("options"), message.index("optional"))
+                            end = message.index("options " if PYTHON_310_OR_HIGHER else "optional ")
                             if all([x in message[start:end] for x in ms.split(",")]):
                                 # remove the line that shows the possibl commands, like e.g.
                                 # {badd, print-item, add}
@@ -84,8 +78,7 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                         message = message.replace("positional arguments:", "POSITIONAL ARGUMENTS:")
 
                     message = self.make_subgroups(message)
-
-                    message = _check_py_version( message.replace("options", "OPTIONS"), message.replace("optional arguments", "OPTIONAL ARGUMENTS"))
+                    message = message.replace("options" if PYTHON_310_OR_HIGHER else "optional arguments", "OPTIONS:")
                     lines = message.split("\n")
                     inds = 1
                     for i in range(1, len(lines)):
@@ -130,7 +123,8 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
         # otherwise it prints generic help but it should print the specific help of the subcommand
         if "unrecognized arguments" in message:
             multiple_args = message.count(" ") > 2
-            option_str = _check_py_version("Unknown option", "Unknown optional argument")
+            option_str = "Unknown option" if PYTHON_310_OR_HIGHER else "Unknown optional argument"
+
             type_arg_msg = option_str if "-" in message else "Extra positional argument"
             if multiple_args:
                 type_arg_msg += "(s)"

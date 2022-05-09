@@ -2,9 +2,9 @@ from setuptools import find_packages
 from setuptools import setup
 
 MAJOR_VERSION = "0"
-MINOR_VERSION = "11"
-MICRO_VERSION = "0"
-VERSION = "{}.{}.{}".format(MAJOR_VERSION, MINOR_VERSION, MICRO_VERSION)
+MINOR_VERSION = "10"
+MICRO_VERSION = "96"
+VERSION = "{}.{}.{}s.format(MAJOR_VERSION, MINOR_VERSION, MICRO_VERSION)
 
 setup(
     name="cliche",
