@@ -14,7 +14,8 @@ CONTAINER_MAPPING.update({k.lower(): v for k, v in CONTAINER_MAPPING.items()})
 container_fn_name_to_type = {}
 class_init_lookup = {}  # for class functions
 
-PYTHON_310_OR_HIGHER = sys.version_info >= (3,10)
+PYTHON_310_OR_HIGHER = sys.version_info >= (3, 10)
+
 
 class ColoredHelpOnErrorParser(argparse.ArgumentParser):
 
@@ -65,7 +66,7 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                             ms = ms[0]
                             first_start = message.index("positional arguments")
                             start = first_start + message[first_start:].index(ms) + len(ms)
-                            end = message.index("options " if PYTHON_310_OR_HIGHER else "optional ")
+                            end = message.index("options:" if PYTHON_310_OR_HIGHER else "optional ")
                             if all([x in message[start:end] for x in ms.split(",")]):
                                 # remove the line that shows the possibl commands, like e.g.
                                 # {badd, print-item, add}
@@ -275,6 +276,13 @@ def base_lookup(fn, tp, sans):
 
 
 def optional_lookup(fn, tp):
+    if type(tp).__name__ == "UnionType":
+        assert len(tp.__args__) == 2, "Union may at most have 2 types"
+        assert type(None) in tp.__args__, "Union must have one None"
+        a, b = tp.__args__
+        if type(a) == type(None):
+            b, a = a, b
+        return base_lookup(fn, a.__name__, a.__name__)
     sans_optional = tp.replace("Optional[", "")
     if tp != sans_optional:  # strip ]
         sans_optional = sans_optional[:-1]
