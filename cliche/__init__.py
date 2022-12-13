@@ -10,9 +10,8 @@ import re
 import os
 import code
 import json
-import asyncio
 from collections import defaultdict
-from inspect import signature, currentframe, getmro
+from inspect import signature, currentframe, getmro, iscoroutinefunction
 import traceback
 from typing import List, Iterable, Set, Tuple, Union
 from types import ModuleType
@@ -194,7 +193,7 @@ def inner_cli(fn, group=""):
                         kwargs.pop(m)
                     kwargs[var_name] = model(**kwargs)
             fn_time = time.time()
-            if asyncio.iscoroutinefunction(fn):
+            if iscoroutinefunction(fn):
                 res = asyncio.run(fn(*args, **kwargs))
             else:
                 res = fn(*args, **kwargs)
