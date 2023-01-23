@@ -1,7 +1,8 @@
 __project__ = "cliche"
-__version__ = "0.10.95"
+__version__ = "0.10.108"
 import time
 import sys
+import warnings
 
 if not getattr(sys, "cliche_ts__", False):
     sys.cliche_ts__ = 0
@@ -158,15 +159,17 @@ def inner_cli(fn, group=""):
         if x.startswith("_"):
             continue
         item = getattr(module, x)
-        if isinstance(item, ModuleType):
-            sub_module = item
-            for y in dir(sub_module):
-                fn.lookup[(x, y)] = getattr(sub_module, y)
-                fn.lookup[(x, y + "Value")] = getattr(sub_module, y)
-        else:
-            fn.lookup[(x,)] = getattr(module, x)
-            fn.lookup[(x + "Value",)] = getattr(module, x)
-            fn.lookup[(x, "V")] = getattr(module, x)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(action="ignore", category=FutureWarning)
+            if isinstance(item, ModuleType):
+                sub_module = item
+                for y in dir(sub_module):
+                    fn.lookup[(x, y)] = getattr(sub_module, y)
+                    fn.lookup[(x, y + "Value")] = getattr(sub_module, y)
+            else:
+                fn.lookup[(x,)] = getattr(module, x)
+                fn.lookup[(x + "Value",)] = getattr(module, x)
+                fn.lookup[(x, "V")] = getattr(module, x)
         if "." in fn.__qualname__:
             class_init_lookup[".".join(fn.__qualname__.split(".")[:-1]) + ".__init__"] = fn.lookup
 
@@ -194,6 +197,8 @@ def inner_cli(fn, group=""):
                     kwargs[var_name] = model(**kwargs)
             fn_time = time.time()
             if iscoroutinefunction(fn):
+                import asyncio
+
                 res = asyncio.run(fn(*args, **kwargs))
             else:
                 res = fn(*args, **kwargs)
@@ -517,3 +522,6 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
             extype, value, tb = sys.exc_info()
             traceback.print_exc()
             pdb.post_mortem(tb)
+
+
+cli.main = main
