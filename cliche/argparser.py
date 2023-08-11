@@ -15,6 +15,7 @@ container_fn_name_to_type = {}
 class_init_lookup = {}  # for class functions
 
 PYTHON_310_OR_HIGHER = sys.version_info >= (3, 10)
+IS_VERBOSE = {"verbose", "verbosity"}
 
 
 class ColoredHelpOnErrorParser(argparse.ArgumentParser):

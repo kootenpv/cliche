@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.10.108"
+__version__ = "0.10.109"
 import time
 import sys
 import warnings
@@ -436,6 +436,7 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
     use_pdb = False
     if "--pdb" in sys.argv:
         sys.argv.remove("--pdb")
+        old_sys_argv = sys.argv.copy()
         use_pdb = True
 
     parser = get_parser()
