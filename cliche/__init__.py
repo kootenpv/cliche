@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.10.109"
+__version__ = "0.10.110"
 import time
 import sys
 import warnings
@@ -408,6 +408,7 @@ def get_parser():
 
 
 def main(exclude_module_names=None, version_info=None, *parser_args):
+    global old_sys_argv
     t1 = time.time()
     if main_called:
         return
