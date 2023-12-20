@@ -322,6 +322,12 @@ def get_fn_info(fn, var_name, default):
         elif default:
             if container_type is dict:
                 tp = (type(list(default)[0]), type(list(default.values())[0]))
+            elif container_lookup(fn, tp, "tuple")[0] != tp:
+                # tp = container_lookup(fn, tp, "tuple")[0]
+                found_result = False
+            elif container_lookup(fn, tp, "list")[0] != tp:
+                # tp = container_lookup(fn, tp, "list")[0]
+                found_result = False
             else:
                 tp = type(list(default)[0])
         else:
@@ -344,6 +350,7 @@ def get_fn_info(fn, var_name, default):
                 if isinstance(tp, str) and container_name in tp:
                     tp, tp_name = container_lookup(fn, tp, container_name)
                     container_type = container
+                    tp_name = "0 or more of: " + tp_name
                     break
             else:
                 if container_type:
@@ -363,6 +370,8 @@ def get_fn_info(fn, var_name, default):
                 elif tp == "str":
                     tp = str
                     tp_name = "str"
+                elif base_lookup(fn, tp, "")[0]:
+                    tp, tp_name = base_lookup(fn, tp, "")
                 elif tp.__class__.__name__ == "EnumTypeWrapper":
                     tp_name = tp._enum_type.name
                 elif hasattr(tp, "__name__"):
@@ -397,6 +406,10 @@ def add_arguments_to_command(cmd, fn, abbrevs=None):
                 default_fmt = default.name
             elif default == "--1":
                 default_fmt = ""
+            elif container_type and "Wrapper" in str(tp):
+                default_fmt = str(container_type([tp.Name(x) for x in default])).replace("'", "").replace('"', "")
+            elif "Wrapper" in str(tp):
+                default_fmt = tp.Name(default)
             else:
                 default_fmt = default
             default_help = f"Default: {default_fmt} | " if default != "--1" else ""
