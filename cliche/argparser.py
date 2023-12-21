@@ -370,7 +370,7 @@ def get_fn_info(fn, var_name, default):
                 elif tp == "str":
                     tp = str
                     tp_name = "str"
-                elif base_lookup(fn, tp, "")[0]:
+                elif isinstance(tp, str) and base_lookup(fn, tp, "")[0]:
                     tp, tp_name = base_lookup(fn, tp, "")
                 elif tp.__class__.__name__ == "EnumTypeWrapper":
                     tp_name = tp._enum_type.name
