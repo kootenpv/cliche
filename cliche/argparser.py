@@ -406,9 +406,9 @@ def add_arguments_to_command(cmd, fn, abbrevs=None):
                 default_fmt = default.name
             elif default == "--1":
                 default_fmt = ""
-            elif container_type and "Wrapper" in str(tp):
+            elif container_type and "Wrapper" in str(tp) and default:
                 default_fmt = str(container_type([tp.Name(x) for x in default])).replace("'", "").replace('"', "")
-            elif "Wrapper" in str(tp):
+            elif "Wrapper" in str(tp) and default:
                 default_fmt = tp.Name(default)
             else:
                 default_fmt = default
