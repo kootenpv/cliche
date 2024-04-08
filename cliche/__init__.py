@@ -1,20 +1,18 @@
 __project__ = "cliche"
-__version__ = "0.10.114"
-import time
+__version__ = "0.10.115"
 import sys
+import time
 import warnings
 
 if not getattr(sys, "cliche_ts__", False):
     sys.cliche_ts__ = 0
 
-import re
-import os
-import code
 import json
-from collections import defaultdict
-from inspect import signature, currentframe, getmro, iscoroutinefunction
+import os
+import re
 import traceback
-from typing import List, Iterable, Set, Tuple, Union
+from collections import defaultdict
+from inspect import currentframe, iscoroutinefunction, signature
 from types import ModuleType
 
 CLICHE_INIT_TS = time.time()
@@ -27,20 +25,18 @@ except ImportError:
     ARGCOMPLETE_IMPORTED = False
 
 
-from cliche.using_underscore import UNDERSCORE_DETECTED
-from cliche.install import install, uninstall, runner
-from cliche.choice import Choice, Enum
 from cliche.argparser import (
     ColoredHelpOnErrorParser,
-    pydantic_models,
     add_arguments_to_command,
     add_command,
-    get_var_name_and_default,
     bool_inverted,
-    container_fn_name_to_type,
     class_init_lookup,
+    container_fn_name_to_type,
     get_desc_str,
+    pydantic_models,
 )
+from cliche.install import install, uninstall
+from cliche.using_underscore import UNDERSCORE_DETECTED
 
 CLICHE_AFTER_INIT_TS = time.time()
 loaded_modules_before = set(sys.modules)
@@ -63,19 +59,20 @@ def get_init(f):
     if cl is None:
         return None, None
     for init_class in cl.__mro__:
-        init = getattr(init_class, "__init__")
+        init = init_class.__init__
         if init is not None:
             return init_class, init
+    return None
 
 
-def highlight(x):
-    return "\x1b[1;36m{}\x1b[0m".format(x)
+def highlight(x) -> str:
+    return f"\x1b[1;36m{x}\x1b[0m"
 
 
-def cli_info(**kwargs):
+def cli_info(**kwargs) -> None:
     """Outputs CLI and Python version info and exits."""
     sv = sys.version_info
-    python_version = "{}.{}.{}".format(sv.major, sv.minor, sv.micro)
+    python_version = f"{sv.major}.{sv.minor}.{sv.micro}"
     installed = False
     try:
         with open(sys.argv[0]) as f:
@@ -130,7 +127,7 @@ if "--timing" in sys.argv:
     print("diff inits", CLICHE_AFTER_INIT_TS - sys.cliche_ts__)
 
 
-def warn(x):
+def warn(x) -> None:
     sys.stderr.write("\033[31m" + x + "\033[0m\n")
     sys.stderr.flush()
 
@@ -173,7 +170,7 @@ def inner_cli(fn, group=""):
         if "." in fn.__qualname__:
             class_init_lookup[".".join(fn.__qualname__.split(".")[:-1]) + ".__init__"] = fn.lookup
 
-    def decorated_fn(*args, **kwargs):
+    def decorated_fn(*args, **kwargs) -> None:
         no_traceback = False
         raw = False
         if "notraceback" in kwargs:
@@ -216,7 +213,7 @@ def inner_cli(fn, group=""):
             if use_timing:
                 print("timing function call success", time.time() - fn_time)
             fn_name, sig = fn.__module__ + "." + fn.__name__, signature(fn)
-            print("Fault while calling {}{} with the above arguments".format(fn_name, sig))
+            print(f"Fault while calling {fn_name}{sig} with the above arguments")
             if no_traceback:
                 warn(traceback.format_exception_only(type(e), e)[-1].strip().split(" ", 1)[1])
                 sys.exit(1)
@@ -247,7 +244,7 @@ def inner_cli(fn, group=""):
     return fn
 
 
-def add_traceback(parser):
+def add_traceback(parser) -> None:
     parser.add_argument(
         "--notraceback",
         action="store_true",
@@ -256,7 +253,7 @@ def add_traceback(parser):
     )
 
 
-def add_pdb(parser):
+def add_pdb(parser) -> None:
     if [x for x in parser._actions if "--pdb" in x.option_strings]:
         return
     parser.add_argument(
@@ -267,7 +264,7 @@ def add_pdb(parser):
     )
 
 
-def add_timing(parser):
+def add_timing(parser) -> None:
     if [x for x in parser._actions if "--timing" in x.option_strings]:
         return
     parser.add_argument(
@@ -278,7 +275,7 @@ def add_timing(parser):
     )
 
 
-def add_raw(parser):
+def add_raw(parser) -> None:
     parser.add_argument(
         "--raw",
         action="store_true",
@@ -287,7 +284,7 @@ def add_raw(parser):
     )
 
 
-def add_cli(parser):
+def add_cli(parser) -> None:
     parser.add_argument(
         "--cli",
         action="store_true",
@@ -296,7 +293,7 @@ def add_cli(parser):
     )
 
 
-def add_cliche_self_parser(parser):
+def add_cliche_self_parser(parser) -> None:
     subparsers = parser.add_subparsers(dest="command")
     installer = subparsers.add_parser("install", help="Create CLI from current folder")
     installer.add_argument("name", help="Name of the cli to create")
@@ -334,7 +331,7 @@ def add_class_arguments(cmd, fn, fn_name):
     return abbrevs
 
 
-def add_optional_cliche_arguments(cmd):
+def add_optional_cliche_arguments(cmd) -> None:
     group = cmd.add_argument_group("OPTIONAL CLI ARGUMENTS")
     add_traceback(group)
     add_cli(group)
@@ -369,13 +366,13 @@ def get_parser():
             add_arguments_to_command(parser, fn)
             parser.description = get_desc_str(fn)
         elif len(fn_registry) == 1 and (len(sys.argv) < 2 or sys.argv[1].replace("-", "_") not in fnames):
-            fn = list(fn_registry.values())[0][1]
+            fn = next(iter(fn_registry.values()))[1]
             add_arguments_to_command(parser, fn)
         else:
             subparsers = parser.add_subparsers(dest="command")
             group_known = False
             if possible_group in groups:
-                for (fn_group, fn_name), (decorated_fn, fn) in fn_registry.items():
+                for (fn_group, fn_name), (_decorated_fn, fn) in fn_registry.items():
                     if possible_group == fn_group:
                         cmd = add_command(subparsers, fn_name, fn)
                         ColoredHelpOnErrorParser.sub_command = possible_group
@@ -386,7 +383,7 @@ def get_parser():
                 del sys.argv[1]
             if not group_known:
                 group_fn_names = defaultdict(list)
-                for (group, fn_name), (decorated_fn, fn) in sorted(
+                for (group, fn_name), (_decorated_fn, fn) in sorted(
                     fn_registry.items(), key=lambda x: (x[0] == "info", x[0])
                 ):
                     if group:
@@ -407,7 +404,7 @@ def get_parser():
     return parser
 
 
-def main(exclude_module_names=None, version_info=None, *parser_args):
+def main(exclude_module_names=None, version_info=None, *parser_args) -> None:
     global old_sys_argv
     t1 = time.time()
     if main_called:
@@ -471,7 +468,7 @@ def main(exclude_module_names=None, version_info=None, *parser_args):
             cmd = parsed_args.command
         except AttributeError:
             if len(fn_registry) == 1:
-                group, cmd = list(fn_registry)[0]
+                group, cmd = next(iter(fn_registry))
             else:
                 warn("No commands have been registered.\n")
                 parser.print_help()

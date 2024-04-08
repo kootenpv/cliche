@@ -1,11 +1,13 @@
+import argparse
+import contextlib
 import re
 import sys
-import argparse
-from typing import Union
 from enum import Enum
+from typing import Union
+
+from cliche.choice import DictAction, EnumAction, ProtoEnumAction
 from cliche.docstring_to_help import parse_doc_params
 from cliche.using_underscore import UNDERSCORE_DETECTED
-from cliche.choice import EnumAction, DictAction, ProtoEnumAction
 
 pydantic_models = {}
 bool_inverted = set()
@@ -19,7 +21,6 @@ IS_VERBOSE = {"verbose", "verbosity"}
 
 
 class ColoredHelpOnErrorParser(argparse.ArgumentParser):
-
     # color_dict is a class attribute, here we avoid compatibility
     # issues by attempting to override the __init__ method
     # RED : Error, GREEN : Okay, YELLOW : Warning, Blue: Help/Info
@@ -27,7 +28,7 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
     # only when called with `cliche`, not `python`
     module_name = False
 
-    def print_help(self, file=None):
+    def print_help(self, file=None) -> None:
         if file is None:
             file = sys.stdout
         self._print_message(self.format_help(), file, self.color_dict["BLUE"])
@@ -38,10 +39,9 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
         if ind == -1:
             return message
         z = message[:ind].rfind("\n")
-        message = message[:z] + "\n\nSUBCOMMANDS:" + message[z:].replace("SUBCOMMAND -> ", "")
-        return message
+        return message[:z] + "\n\nSUBCOMMANDS:" + message[z:].replace("SUBCOMMAND -> ", "")
 
-    def _print_message(self, message, file=None, color=None):
+    def _print_message(self, message, file=None, color=None) -> None:
         if message:
             message = message[0].upper() + message[1:]
             if self.module_name:
@@ -55,7 +55,7 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
             else:
                 # \x1b[ is the ANSI Control Sequence Introducer (CSI)
                 if hasattr(self, "sub_command"):
-                    message = message.replace(self.prog, getattr(self, "sub_command"))
+                    message = message.replace(self.prog, self.sub_command)
                 if color == self.color_dict["BLUE"]:
                     message = message.strip()
                     if len(self.prog.split()) > 1:
@@ -68,7 +68,7 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                             first_start = message.index("positional arguments")
                             start = first_start + message[first_start:].index(ms) + len(ms)
                             end = message.index("options:" if PYTHON_310_OR_HIGHER else "optional ")
-                            if all([x in message[start:end] for x in ms.split(",")]):
+                            if all(x in message[start:end] for x in ms.split(",")):
                                 # remove the line that shows the possibl commands, like e.g.
                                 # {badd, print-item, add}
                                 message = re.sub(
@@ -116,12 +116,12 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
                 else:
                     file.write("\x1b[" + color + "m" + message.strip() + "\x1b[0m\n")
 
-    def exit(self, status=0, message=None):
+    def exit(self, status=0, message=None) -> None:
         if message:
             self._print_message(message, sys.stderr, self.color_dict["RED"])
         sys.exit(status)
 
-    def error(self, message):
+    def error(self, message) -> None:
         # otherwise it prints generic help but it should print the specific help of the subcommand
         if "unrecognized arguments" in message:
             multiple_args = message.count(" ") > 2
@@ -131,10 +131,8 @@ class ColoredHelpOnErrorParser(argparse.ArgumentParser):
             if multiple_args:
                 type_arg_msg += "(s)"
             message = message.replace("unrecognized arguments", type_arg_msg)
-            try:
+            with contextlib.suppress(SystemExit):
                 self.parse_args(sys.argv[1:-1] + ["--help"])
-            except SystemExit:
-                pass
         else:
             self.print_help(sys.stderr)
         self.exit(2, message)
@@ -150,8 +148,7 @@ def get_desc_str(fn):
 def add_command(subparsers, fn_name, fn):
     desc = get_desc_str(fn)
     name = fn_name if UNDERSCORE_DETECTED else fn_name.replace("_", "-")
-    cmd = subparsers.add_parser(name, help=desc, description=desc)
-    return cmd
+    return subparsers.add_parser(name, help=desc, description=desc)
 
 
 def is_pydantic(class_type):
@@ -161,7 +158,7 @@ def is_pydantic(class_type):
         return False
 
 
-def add_group(parser_cmd, model, fn, var_name, abbrevs):
+def add_group(parser_cmd, model, fn, var_name, abbrevs) -> None:
     kwargs = []
     pydantic_models[fn] = {}
     name = model.__name__ if UNDERSCORE_DETECTED else model.__name__.replace("_", "-")
@@ -172,10 +169,8 @@ def add_group(parser_cmd, model, fn, var_name, abbrevs):
         default_help = f"Default: {default} | " if default != "--1" else ""
         tp = field.type_
         container_type = tp in [list, set, tuple]
-        try:
+        with contextlib.suppress(AttributeError):
             container_type = CONTAINER_MAPPING.get(tp._name)
-        except AttributeError:
-            pass
         if is_pydantic(tp):
             msg = "Cannot use nested pydantic just yet:" + f"property {var_name}.{field_name} of function {fn.__name__}"
             raise ValueError(msg)
@@ -189,7 +184,7 @@ def get_var_names(var_name, abbrevs):
     if var_name.startswith("--"):
         short = "-" + var_name[2]
         # don't add shortening for inverted bools
-        if var_name.startswith("--no-") or var_name.startswith("--no_"):
+        if var_name.startswith(("--no-", "--no_")):
             var_names = [var_name]
         elif short not in abbrevs:
             abbrevs.append(short)
@@ -211,16 +206,14 @@ def protobuf_tp_converter(tp):
     return inner
 
 
-def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, abbrevs):
+def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, abbrevs) -> None:
     kwargs = {}
     var_name = var_name if UNDERSCORE_DETECTED else var_name.replace("_", "-")
     arg_desc = arg_desc.replace("%", "%%")
     nargs = None
     if container_type:
-        try:
+        with contextlib.suppress(AttributeError):
             tp = tp.__args__[0]
-        except AttributeError as e:
-            pass
         nargs = "*"
     if tp is bool:
         action = "store_true" if not default else "store_false"
@@ -253,9 +246,9 @@ def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, ab
 
 def get_var_name_and_default(fn):
     arg_count = fn.__code__.co_argcount
-    defs = fn.__defaults__ or tuple()
+    defs = fn.__defaults__ or ()
     defaults = (("--1",) * arg_count + defs)[-arg_count:]
-    for var_name, default in zip(fn.__code__.co_varnames, defaults):
+    for var_name, default in zip(fn.__code__.co_varnames, defaults, strict=False):
         if var_name in ["self", "cls"]:
             continue
         yield var_name, default
@@ -278,7 +271,20 @@ def base_lookup(fn, tp, sans):
     return tp, tp_name
 
 
+def optional_pipe_lookup(fn, tp) -> None:
+    if tp.startswith("None | "):
+        sans_optional = tp[7:]
+    elif tp.endswith("| None"):
+        sans_optional = tp[:-7]
+    else:
+        msg = f"Optional confusion: {fn} {tp}"
+        raise Exception(msg)
+    return base_lookup(fn, tp, sans_optional)
+
+
 def optional_lookup(fn, tp):
+    if isinstance(tp, str) and "|" in tp:
+        return optional_pipe_lookup(fn, tp)
     if type(tp).__name__ == "UnionType":
         assert len(tp.__args__) == 2, "Union may at most have 2 types"
         assert type(None) in tp.__args__, "Union must have one None"
@@ -310,18 +316,18 @@ def get_fn_info(fn, var_name, default):
     if default_type in [list, set, tuple, dict]:
         container_type = default_type
         if "typing" not in str(tp):
-            tp_args = ", ".join(set(type(x).__name__ for x in default)) or "str"
+            tp_args = ", ".join({type(x).__name__ for x in default}) or "str"
             tp_name = "1 or more of: " + tp_args
         else:
             tp_args = ", ".join(x.__name__ for x in tp.__args__)
             tp_name = "1 or more of: " + tp_args
         if hasattr(tp, "__args__"):
             tp = tp.__args__[0]
-        elif len(set([type(x) for x in default])) > 1:
+        elif len({type(x) for x in default}) > 1:
             tp = None
         elif default:
             if container_type is dict:
-                tp = (type(list(default)[0]), type(list(default.values())[0]))
+                tp = (type(next(iter(default))), type(next(iter(default.values()))))
             elif container_lookup(fn, tp, "tuple")[0] != tp:
                 # tp = container_lookup(fn, tp, "tuple")[0]
                 found_result = False
@@ -329,12 +335,12 @@ def get_fn_info(fn, var_name, default):
                 # tp = container_lookup(fn, tp, "list")[0]
                 found_result = False
             else:
-                tp = type(list(default)[0])
+                tp = type(next(iter(default)))
         else:
             found_result = False
     if not found_result:
         try:
-            if getattr(tp, "__origin__") == Union:
+            if tp.__origin__ == Union:
                 tp = tp.__args__[0]
             container_type = CONTAINER_MAPPING.get(tp._name)
         except AttributeError:
@@ -395,7 +401,7 @@ def add_arguments_to_command(cmd, fn, abbrevs=None):
         doc_text = doc_params.get(var_name, "")
         # changing the name to "no_X" in case the default is True for X, since we should set a flag to invert it
         # e.g. --sums becomes --no-sums
-        if tp == bool and default == True:
+        if tp == bool and default is True:
             var_name = "no_" + var_name
             bool_inverted.add(var_name)
             default = False
