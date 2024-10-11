@@ -1,5 +1,6 @@
-from enum import Enum
+import contextlib
 from argparse import Action
+from enum import Enum
 
 
 def Choice(*args):
@@ -10,23 +11,23 @@ def Choice(*args):
 
 
 class EnumAction(Action):
-    """
-    Argparse action for handling Enums
-    """
+    """Argparse action for handling Enums"""
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         # Pop off the type value
         enum = kwargs.pop("type", None)
 
         # Ensure an Enum subclass is provided
         if enum is None:
-            raise ValueError("type must be assigned an Enum when using EnumAction")
+            msg = "type must be assigned an Enum when using EnumAction"
+            raise ValueError(msg)
         if not issubclass(enum, Enum):
-            raise TypeError("type must be an Enum when using EnumAction")
+            msg = "type must be an Enum when using EnumAction"
+            raise TypeError(msg)
         # Generate choices from the Enum
         kwargs.setdefault("choices", tuple(e.name for e in enum))
 
-        super(EnumAction, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         self._enum = enum
 
@@ -34,10 +35,8 @@ class EnumAction(Action):
         if value in self._enum.__members__:
             enum = self._enum[value]
         else:
-            try:
+            with contextlib.suppress(ValueError):
                 value = int(value)
-            except ValueError:
-                pass
             enum = self._enum(value)
         return enum
 
@@ -51,17 +50,15 @@ class EnumAction(Action):
 
 
 class DictAction(Action):
-    """
-    Argparse action for handling Protobuf Enums
-    """
+    """Argparse action for handling Protobuf Enums"""
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         self.key_class = kwargs["type"][0][0]
         self.value_class = kwargs["type"][1][0]
 
         self._tps = kwargs.pop("type", None)
 
-        super(DictAction, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
     def enum_lookup(self, key_or_value, value):
         enum = None
@@ -72,35 +69,34 @@ class DictAction(Action):
             if value in self.value_class.__members__:
                 enum = self.value_class[value]
         if enum is None:
-            try:
+            with contextlib.suppress(ValueError):
                 value = int(value)
-            except ValueError:
-                pass
             enum_class = self.key_class if key_or_value == "key" else self.value_class
             enum = enum_class(value)
         return enum
 
     def proto_enum_lookup(self, key_or_value, value):
         if key_or_value == "key":
-            res = dict(zip(self.key_class.keys(), self.key_class.values()))
+            res = dict(zip(self.key_class.keys(), self.key_class.values(), strict=False))
             if value in res:
                 return res[value]
             try:
                 return int(value)
             except:
-                raise ValueError(
-                    f"{value} not in Protobuf type {self.key_class._enum_type.name}, valid keys: {list(res.keys())}"
-                )
+                msg = f"{value} not in Protobuf type {self.key_class._enum_type.name}, valid keys: {list(res.keys())}"
+                raise ValueError(msg)
         if key_or_value == "value":
-            res = dict(zip(self.value_class.keys(), self.value_class.values()))
+            res = dict(zip(self.value_class.keys(), self.value_class.values(), strict=False))
             if value in res:
                 return res[value]
             try:
                 return int(value)
             except:
-                raise ValueError(
+                msg = (
                     f"{value} not in Protobuf type {self.value_class._enum_type.name}, valid values: {list(res.keys())}"
                 )
+                raise ValueError(msg)
+        return None
 
     def key_lookup(self, key):
         if hasattr(self.key_class, "__members__"):
@@ -114,7 +110,10 @@ class DictAction(Action):
             return self.enum_lookup("value", value)
         if "EnumTypeWrapper" in str(self.value_class):
             return self.proto_enum_lookup("value", value)
-        return self.value_class(value)
+        try:
+            return self.value_class(value)
+        except TypeError:
+            return value
 
     def single_lookup(self, v) -> dict:
         key, value = v.split("=")
@@ -130,21 +129,20 @@ class DictAction(Action):
 
 
 class ProtoEnumAction(Action):
-    """
-    Argparse action for handling Protobuf Enums
-    """
+    """Argparse action for handling Protobuf Enums"""
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         # Pop off the type value
         enum = kwargs.pop("type", None)
 
         # Ensure an Enum subclass is provided
         if enum is None:
-            raise ValueError("type must be assigned an Enum when using EnumAction")
+            msg = "type must be assigned an Enum when using EnumAction"
+            raise ValueError(msg)
         # Generate choices from the Enum
         kwargs.setdefault("choices", tuple(enum.keys()))
 
-        super(ProtoEnumAction, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         self._enum = enum
 
