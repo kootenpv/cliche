@@ -354,8 +354,23 @@ def get_fn_info(fn, var_name, default):
         tp = fn.__annotations__.get(var_name, default_type or str)
 
     # Use typing helpers to extract container type and subtype
-    container_type = get_origin(tp) or False
+    origin = get_origin(tp)
     tp_args = get_args(tp)
+
+    # Union types (including Optional) are not container types for CLI purposes
+    if origin is Union or isinstance(tp, types.UnionType):
+        container_type = False
+        # Extract the non-None type from the union
+        tp = extract_type_from_union(tp)
+        tp_args = ()  # Clear args since we've extracted the type
+        # Set tp_name for the extracted type
+        if hasattr(tp, "__name__"):
+            tp_name = tp.__name__
+        else:
+            tp_name = str(tp)
+    else:
+        container_type = origin or False
+        tp_name = "bugggg"  # Will be set later
 
     # If typing helpers failed (protobuf enums), fall back to original string-based logic
     if not container_type:
