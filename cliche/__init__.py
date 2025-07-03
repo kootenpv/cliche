@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.10.119"
+__version__ = "0.10.120"
 import sys
 import time
 import warnings
@@ -89,6 +89,7 @@ def cli_info(**kwargs) -> None:
     except FileNotFoundError:
         pass
     v = f" (version {version[0]})" if version else ""
+    python_dir = "/".join(sys.executable.split("/")[:-1])
     print("Executable:          ", highlight(name + v))
     print("Executable path:     ", highlight(sys.argv[0]))
     print("Cache path:          ", highlight(sys.argv[0] + ".json"))
@@ -99,8 +100,8 @@ def cli_info(**kwargs) -> None:
     print("Autocomplete enabled:", highlight(autocomplete), "(only possible on Linux)")
     print("Python Version:      ", highlight(python_version))
     print("Python Interpreter:  ", highlight(sys.executable))
-    cliche_loc = "/".join(sys.executable.split("/")[:-1]) + "/cliche"
-    print("Cliche:              ", highlight(cliche_loc))
+    print("Python pip:          ", highlight(python_dir + "/pip"))
+    print("Cliche:              ", highlight(python_dir + "/cliche"))
 
 
 # t1 = time.time()
@@ -506,7 +507,13 @@ def main(exclude_module_names=None, version_info=None, *parser_args) -> None:
                     for key in [(cmd, name), (cmd, "--" + name)]:
                         if key in container_fn_name_to_type:
                             if value is not None:
-                                kwargs[name] = container_fn_name_to_type[key](value)
+                                # For lists that need to be converted to other container types (like tuple)
+                                # Just convert the container type, preserving the already-processed values
+                                if isinstance(value, list) and container_fn_name_to_type[key] != list:
+                                    kwargs[name] = container_fn_name_to_type[key](value)
+                                elif not isinstance(value, (list, tuple, set)):
+                                    # Only apply container conversion if it's not already a container
+                                    kwargs[name] = container_fn_name_to_type[key](value)
                 fn_registry[(group, cmd)][0](*starargs, **kwargs)
                 if use_timing:
                     print("timing function call success", time.time() - t3)

@@ -4,7 +4,7 @@ import re
 import sys
 import types
 from enum import Enum
-from typing import Union, get_args, get_origin, get_type_hints
+from typing import Union, get_args, get_origin
 
 from cliche.choice import DictAction, EnumAction, ProtoEnumAction
 from cliche.docstring_to_help import parse_doc_params
@@ -243,14 +243,24 @@ def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, ab
     arg_desc = arg_desc.replace("%", "%%")
     nargs = None
 
-    # Extract the actual type from union types before processing
-    tp = extract_type_from_union(tp)
+    # Extract the actual type from union types before processing, but only if it's actually a union
+    if (
+        isinstance(tp, types.UnionType)
+        or (hasattr(tp, "__origin__") and tp.__origin__ is Union)
+        or (isinstance(tp, str) and (" | " in tp or "None |" in tp or "| None" in tp))
+    ):
+        tp = extract_type_from_union(tp)
 
     if container_type:
         with contextlib.suppress(AttributeError):
             tp = tp.__args__[0]
-            # Extract type from union if needed after container extraction
-            tp = extract_type_from_union(tp)
+            # Only extract type from union if it's actually a union type
+            if (
+                isinstance(tp, types.UnionType)
+                or (hasattr(tp, "__origin__") and tp.__origin__ is Union)
+                or (isinstance(tp, str) and (" | " in tp or "None |" in tp or "| None" in tp))
+            ):
+                tp = extract_type_from_union(tp)
         nargs = "*"
     if tp is bool:
         action = "store_true" if not default else "store_false"
@@ -261,6 +271,12 @@ def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, ab
         if isinstance(tp, tuple):
             kwargs["action"] = DictAction
         elif "EnumTypeWrapper" in str(tp):
+            kwargs["action"] = ProtoEnumAction
+        elif hasattr(tp, "__class__") and tp.__class__.__name__ == "EnumTypeWrapper":
+            # Another way to detect protobuf enums
+            kwargs["action"] = ProtoEnumAction
+        elif hasattr(tp, "_enum_type"):
+            # Yet another way to detect protobuf enums
             kwargs["action"] = ProtoEnumAction
         elif issubclass(tp, Enum):
             kwargs["action"] = EnumAction
@@ -278,7 +294,13 @@ def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, ab
     if container_type:
         fn = parser_cmd.prog.split()[-1]
         container_fn_name_to_type[(fn, var_name)] = container_type
-    parser_cmd.add_argument(*var_names, type=tp, nargs=nargs, default=default, help=arg_desc, **kwargs)
+    # When using custom actions (DictAction, ProtoEnumAction, EnumAction),
+    # the type parameter should be passed to the action, not to add_argument
+    if "action" in kwargs and kwargs["action"] in [DictAction, ProtoEnumAction, EnumAction]:
+        kwargs["type"] = tp
+        parser_cmd.add_argument(*var_names, nargs=nargs, default=default, help=arg_desc, **kwargs)
+    else:
+        parser_cmd.add_argument(*var_names, type=tp, nargs=nargs, default=default, help=arg_desc, **kwargs)
 
 
 def get_var_name_and_default(fn):
@@ -345,37 +367,47 @@ def container_lookup(fn, tp, container_name):
 def get_fn_info(fn, var_name, default):
     default_type = type(default) if default != "--1" and default is not None else None
 
-    # Try to get properly evaluated type hints first
-    try:
-        type_hints = get_type_hints(fn)
-        tp = type_hints.get(var_name, fn.__annotations__.get(var_name, default_type or str))
-    except Exception:
-        # Fall back to raw annotations if get_type_hints fails
-        tp = fn.__annotations__.get(var_name, default_type or str)
+    # Always use raw annotations to preserve protobuf enum references
+    # get_type_hints() evaluates forward references too eagerly and breaks protobuf enums
+    tp = fn.__annotations__.get(var_name, default_type or str)
 
     # Use typing helpers to extract container type and subtype
     origin = get_origin(tp)
     tp_args = get_args(tp)
 
-    # Union types (including Optional) are not container types for CLI purposes
-    if origin is Union or isinstance(tp, types.UnionType):
-        container_type = False
-        # Extract the non-None type from the union
-        tp = extract_type_from_union(tp)
-        tp_args = ()  # Clear args since we've extracted the type
-        # Set tp_name for the extracted type
-        if hasattr(tp, "__name__"):
-            tp_name = tp.__name__
-        else:
-            tp_name = str(tp)
-    else:
-        container_type = origin or False
-        tp_name = "bugggg"  # Will be set later
+    # Set container_type from origin
+    container_type = origin or False
+    tp_name = "bugggg"  # Will be set later
 
     # If typing helpers failed (protobuf enums), fall back to original string-based logic
     if not container_type:
+        # Check if it's a string annotation for a container type
+        if isinstance(tp, str):
+            # Parse string annotations like "tuple[Location.V, ...]"
+            tp_lower = tp.lower()
+            for container_name, container_class in CONTAINER_MAPPING.items():
+                if container_name.lower() + "[" in tp_lower:
+                    container_type = container_class
+                    # Extract the inner type
+                    inner = tp[tp.find("[") + 1 : tp.rfind("]")]
+                    inner = inner.replace(", ...", "").strip()
+                    if "." in inner:
+                        # Resolve dotted names like Location.V
+                        # For protobuf enums, we want the enum type, not the value
+                        # So for "Location.V", we want to look up "Location"
+                        enum_name = inner.split(".")[0]
+                        tp, tp_name = base_lookup(fn, inner, enum_name)
+                        # If that didn't work, try looking up the enum directly
+                        if tp == inner and (enum_name,) in fn.lookup:
+                            tp = fn.lookup[(enum_name,)]
+                            tp_name = enum_name
+                    else:
+                        tp, tp_name = base_lookup(fn, inner, inner)
+                    tp_name = f"1 or more of: {tp_name}"
+                    break
+
         # Use original logic for complex types like protobuf enums
-        if default_type in [list, set, tuple, dict]:
+        if not container_type and default_type in [list, set, tuple, dict]:
             container_type = default_type
             if "typing" not in str(tp):
                 tp_args = ", ".join({type(x).__name__ for x in default}) or "str"
@@ -463,8 +495,30 @@ def get_fn_info(fn, var_name, default):
                 tp = subtype
                 tp_name = f"1 or more of: {subtype.__name__}"
             else:
-                tp = str
-                tp_name = "1 or more of: str"
+                # Subtype might be an evaluated enum value (int) from Location.V
+                # Try to parse the original annotation string to get the enum type
+                tp_str = str(tp)
+                if "[" in tp_str and "." in tp_str:
+                    # Extract the type inside brackets
+                    inner = tp_str[tp_str.find("[") + 1 : tp_str.rfind("]")]
+                    # Remove ellipsis if present
+                    inner = inner.replace(", ...", "").strip()
+                    if "." in inner:
+                        # This might be something like "Location.V"
+                        # Use base_lookup to resolve it to the actual enum type
+                        resolved_tp, resolved_name = base_lookup(fn, inner, inner.split(".")[0])
+                        if resolved_tp != inner:  # Successfully resolved
+                            tp = resolved_tp
+                            tp_name = f"1 or more of: {resolved_name}"
+                        else:
+                            tp = str
+                            tp_name = "1 or more of: str"
+                    else:
+                        tp = str
+                        tp_name = "1 or more of: str"
+                else:
+                    tp = str
+                    tp_name = "1 or more of: str"
     else:
         # Container type without args, use str as default
         tp = str
