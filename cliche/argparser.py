@@ -2,8 +2,9 @@ import argparse
 import contextlib
 import re
 import sys
+import types
 from enum import Enum
-from typing import Union
+from typing import Union, get_args, get_origin, get_type_hints
 
 from cliche.choice import DictAction, EnumAction, ProtoEnumAction
 from cliche.docstring_to_help import parse_doc_params
@@ -206,14 +207,50 @@ def protobuf_tp_converter(tp):
     return inner
 
 
+def extract_type_from_union(tp):
+    """Extract the non-None type from a Union type or return the type as-is."""
+    # Handle string representation of union (e.g., 'X | None')
+    if isinstance(tp, str):
+        if " | None" in tp or "None | " in tp:
+            # This is a stringified union type, we can't use it as a callable
+            # Default to str for now
+            return str
+        return tp
+
+    # Handle Python 3.10+ union syntax (X | Y)
+    if isinstance(tp, types.UnionType):
+        # Find the non-None type in the union
+        args = tp.__args__
+        non_none_types = [arg for arg in args if arg is not type(None)]
+        if non_none_types:
+            return non_none_types[0]
+        return str  # Default to str if we can't find a proper type
+
+    # Handle typing.Union
+    if hasattr(tp, "__origin__") and tp.__origin__ is Union:
+        args = tp.__args__
+        non_none_types = [arg for arg in args if arg is not type(None)]
+        if non_none_types:
+            return non_none_types[0]
+        return str  # Default to str if we can't find a proper type
+
+    return tp
+
+
 def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, abbrevs) -> None:
     kwargs = {}
     var_name = var_name if UNDERSCORE_DETECTED else var_name.replace("_", "-")
     arg_desc = arg_desc.replace("%", "%%")
     nargs = None
+
+    # Extract the actual type from union types before processing
+    tp = extract_type_from_union(tp)
+
     if container_type:
         with contextlib.suppress(AttributeError):
             tp = tp.__args__[0]
+            # Extract type from union if needed after container extraction
+            tp = extract_type_from_union(tp)
         nargs = "*"
     if tp is bool:
         action = "store_true" if not default else "store_false"
@@ -285,7 +322,7 @@ def optional_pipe_lookup(fn, tp) -> None:
 def optional_lookup(fn, tp):
     if isinstance(tp, str) and "|" in tp:
         return optional_pipe_lookup(fn, tp)
-    if type(tp).__name__ == "UnionType":
+    if type(tp).__name__ == "UnionType" or isinstance(tp, types.UnionType):
         assert len(tp.__args__) == 2, "Union may at most have 2 types"
         assert type(None) in tp.__args__, "Union must have one None"
         a, b = tp.__args__
@@ -307,83 +344,117 @@ def container_lookup(fn, tp, container_name):
 
 def get_fn_info(fn, var_name, default):
     default_type = type(default) if default != "--1" and default is not None else None
-    tp = fn.__annotations__.get(var_name, default_type or str)
-    # List, Iterable, Set, Tuple
-    container_type = False
-    found_result = True
-    tp_name = "bugggg"
-    found_result = default_type in [list, set, tuple, dict]
-    if default_type in [list, set, tuple, dict]:
-        container_type = default_type
-        if "typing" not in str(tp):
-            tp_args = ", ".join({type(x).__name__ for x in default}) or "str"
-            tp_name = "1 or more of: " + tp_args
-        else:
-            tp_args = ", ".join(x.__name__ for x in tp.__args__)
-            tp_name = "1 or more of: " + tp_args
-        if hasattr(tp, "__args__"):
-            tp = tp.__args__[0]
-        elif len({type(x) for x in default}) > 1:
-            tp = None
-        elif default:
-            if container_type is dict:
-                tp = (type(next(iter(default))), type(next(iter(default.values()))))
-            elif container_lookup(fn, tp, "tuple")[0] != tp:
-                # tp = container_lookup(fn, tp, "tuple")[0]
-                found_result = False
-            elif container_lookup(fn, tp, "list")[0] != tp:
-                # tp = container_lookup(fn, tp, "list")[0]
-                found_result = False
+
+    # Try to get properly evaluated type hints first
+    try:
+        type_hints = get_type_hints(fn)
+        tp = type_hints.get(var_name, fn.__annotations__.get(var_name, default_type or str))
+    except Exception:
+        # Fall back to raw annotations if get_type_hints fails
+        tp = fn.__annotations__.get(var_name, default_type or str)
+
+    # Use typing helpers to extract container type and subtype
+    container_type = get_origin(tp) or False
+    tp_args = get_args(tp)
+
+    # If typing helpers failed (protobuf enums), fall back to original string-based logic
+    if not container_type:
+        # Use original logic for complex types like protobuf enums
+        if default_type in [list, set, tuple, dict]:
+            container_type = default_type
+            if "typing" not in str(tp):
+                tp_args = ", ".join({type(x).__name__ for x in default}) or "str"
+                tp_name = "1 or more of: " + tp_args
             else:
-                tp = type(next(iter(default)))
-        else:
-            found_result = False
-    if not found_result:
-        try:
-            if tp.__origin__ == Union:
+                tp_args = ", ".join(x.__name__ for x in tp.__args__ if hasattr(x, "__name__"))
+                tp_name = "1 or more of: " + tp_args
+            if hasattr(tp, "__args__"):
                 tp = tp.__args__[0]
-            container_type = CONTAINER_MAPPING.get(tp._name)
-        except AttributeError:
-            pass
-        if "dict[" in str(tp).lower():
-            if str(tp).lower().startswith("optional"):
-                tp = tp[9:-1]
-            aa, bb = tp[5:-1].split(", ")
-            tp = (base_lookup(fn, tp, aa), base_lookup(fn, tp, bb))
-            container_type = dict
-        else:
-            for container_name, container in CONTAINER_MAPPING.items():
-                if isinstance(tp, str) and container_name in tp:
-                    tp, tp_name = container_lookup(fn, tp, container_name)
-                    container_type = container
-                    tp_name = "0 or more of: " + tp_name
-                    break
-            else:
-                if container_type:
-                    if not hasattr(tp, "__args__"):
-                        tp_arg = "str"
-                        tp = str
-                    else:
-                        if tp.__args__ and "Union" in str(tp.__args__[0]):
-                            # cannot cast
-                            tp_arg = "str"
-                        elif tp.__args__:
-                            tp_arg = tp.__args__[0].__name__
-                        else:
-                            tp_arg = "str"
-                        tp = tp.__args__[0]
-                    tp_name = "0 or more of: " + tp_arg
-                elif tp == "str":
-                    tp = str
-                    tp_name = "str"
-                elif isinstance(tp, str) and base_lookup(fn, tp, "")[0]:
-                    tp, tp_name = base_lookup(fn, tp, "")
-                elif tp.__class__.__name__ == "EnumTypeWrapper":
-                    tp_name = tp._enum_type.name
-                elif hasattr(tp, "__name__"):
-                    tp_name = tp.__name__
+            elif len({type(x) for x in default}) > 1:
+                tp = None
+            elif default:
+                if container_type is dict:
+                    tp = ((type(next(iter(default))),), (type(next(iter(default.values()))),))
                 else:
-                    tp, tp_name = optional_lookup(fn, tp)
+                    tp = type(next(iter(default)))
+            else:
+                tp = str
+        else:
+            # Check if it's a string representation of a container type
+            tp_str = str(tp)
+            if "dict[" in tp_str.lower():
+                # Special handling for dict types
+                container_type = dict
+                if tp_str.lower().startswith("optional"):
+                    tp_str = tp_str[9:-1]
+                if "[" in tp_str and "]" in tp_str:
+                    dict_content = tp_str[tp_str.find("[") + 1 : tp_str.rfind("]")]
+                    if ", " in dict_content:
+                        key_type_str, value_type_str = dict_content.split(", ", 1)
+                        key_type = base_lookup(fn, tp_str, key_type_str.strip())[0]
+                        value_type = base_lookup(fn, tp_str, value_type_str.strip())[0]
+                        tp = ((key_type,), (value_type,))
+                        tp_name = f"dict[{key_type_str.strip()}, {value_type_str.strip()}]"
+                    else:
+                        tp = ((str,), (str,))
+                        tp_name = "dict[str, str]"
+                else:
+                    tp = ((str,), (str,))
+                    tp_name = "dict[str, str]"
+            else:
+                # Handle other container types
+                for container_name, container_class in CONTAINER_MAPPING.items():
+                    if container_name.lower() in tp_str.lower():
+                        tp, tp_name = container_lookup(fn, tp_str, container_name.lower())
+                        container_type = container_class
+                        tp_name = "1 or more of: " + tp_name
+                        break
+                else:
+                    # Handle simple types
+                    if tp == "str":
+                        tp = str
+                        tp_name = "str"
+                    elif tp.__class__.__name__ == "EnumTypeWrapper":
+                        tp_name = tp._enum_type.name
+                    elif hasattr(tp, "__name__"):
+                        tp_name = tp.__name__
+                    elif isinstance(tp, str) and base_lookup(fn, tp, "")[0]:
+                        tp, tp_name = base_lookup(fn, tp, "")
+                    else:
+                        tp, tp_name = optional_lookup(fn, tp)
+    elif tp_args:
+        if container_type is Union:
+            # Handle Union types (including Optional)
+            tp = tp_args[0]
+            tp_name = tp.__name__ if hasattr(tp, "__name__") else str(tp)
+            container_type = False  # Union isn't a container for CLI purposes
+        elif container_type is dict:
+            # For dict types, return tuple of ((key_type,), (value_type,))
+            if len(tp_args) >= 2:
+                tp = ((tp_args[0],), (tp_args[1],))
+                tp_name = f"dict[{tp_args[0].__name__}, {tp_args[1].__name__}]"
+            else:
+                tp = ((str,), (str,))
+                tp_name = "dict[str, str]"
+        else:
+            # For list, tuple, set, etc.
+            subtype = tp_args[0]
+
+            # Check if subtype is a protobuf enum
+            if hasattr(subtype, "__class__") and subtype.__class__.__name__ == "EnumTypeWrapper":
+                tp = subtype
+                tp_name = f"1 or more of: {subtype._enum_type.name}"
+            elif hasattr(subtype, "__name__") and not str(subtype).startswith("<"):
+                tp = subtype
+                tp_name = f"1 or more of: {subtype.__name__}"
+            else:
+                tp = str
+                tp_name = "1 or more of: str"
+    else:
+        # Container type without args, use str as default
+        tp = str
+        tp_name = "1 or more of: str"
+
     return tp, tp_name, default, container_type
 
 
