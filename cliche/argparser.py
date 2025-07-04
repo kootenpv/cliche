@@ -2,141 +2,20 @@ import argparse
 import contextlib
 import re
 import sys
-import types
 from enum import Enum
-from typing import Union, get_args, get_origin
 
-from cliche.choice import DictAction, EnumAction, ProtoEnumAction
 from cliche.docstring_to_help import parse_doc_params
+from cliche.output import CleanArgumentParser
+from cliche.type_utils import CONTAINER_MAPPING
 from cliche.using_underscore import UNDERSCORE_DETECTED
 
 pydantic_models = {}
 bool_inverted = set()
-CONTAINER_MAPPING = {"List": list, "Iterable": list, "Set": set, "Tuple": tuple}
-CONTAINER_MAPPING.update({k.lower(): v for k, v in CONTAINER_MAPPING.items()})
 container_fn_name_to_type = {}
 class_init_lookup = {}  # for class functions
 
 PYTHON_310_OR_HIGHER = sys.version_info >= (3, 10)
 IS_VERBOSE = {"verbose", "verbosity"}
-
-
-class ColoredHelpOnErrorParser(argparse.ArgumentParser):
-    # color_dict is a class attribute, here we avoid compatibility
-    # issues by attempting to override the __init__ method
-    # RED : Error, GREEN : Okay, YELLOW : Warning, Blue: Help/Info
-    color_dict = {"RED": "1;31", "GREEN": "1;32", "YELLOW": "1;33", "BLUE": "1;36"}
-    # only when called with `cliche`, not `python`
-    module_name = False
-
-    def print_help(self, file=None) -> None:
-        if file is None:
-            file = sys.stdout
-        self._print_message(self.format_help(), file, self.color_dict["BLUE"])
-
-    @staticmethod
-    def make_subgroups(message):
-        ind = message.find("SUBCOMMAND -> ")
-        if ind == -1:
-            return message
-        z = message[:ind].rfind("\n")
-        return message[:z] + "\n\nSUBCOMMANDS:" + message[z:].replace("SUBCOMMAND -> ", "")
-
-    def _print_message(self, message, file=None, color=None) -> None:
-        if message:
-            message = message[0].upper() + message[1:]
-            if self.module_name:
-                repl = " ".join(["cliche " + self.module_name] + self.prog.split()[1:])
-                message = message.replace(self.prog, repl)
-            if file is None:
-                file = sys.stderr
-            # Print messages in bold, colored text if color is given.
-            if color is None:
-                file.write(message)
-            else:
-                # \x1b[ is the ANSI Control Sequence Introducer (CSI)
-                if hasattr(self, "sub_command"):
-                    message = message.replace(self.prog, self.sub_command)
-                if color == self.color_dict["BLUE"]:
-                    message = message.strip()
-                    if len(self.prog.split()) > 1:
-                        message = message.replace("positional arguments:", "POSITIONAL ARGUMENTS:")
-                    else:
-                        # check if first is a positional arg or actual command
-                        ms = re.findall("positional arguments:.  {([^}]+)..", message, flags=re.DOTALL)
-                        if ms:
-                            ms = ms[0]
-                            first_start = message.index("positional arguments")
-                            start = first_start + message[first_start:].index(ms) + len(ms)
-                            end = message.index("options:" if PYTHON_310_OR_HIGHER else "optional ")
-                            if all(x in message[start:end] for x in ms.split(",")):
-                                # remove the line that shows the possibl commands, like e.g.
-                                # {badd, print-item, add}
-                                message = re.sub(
-                                    "positional arguments:.  {[^ }]+..",
-                                    "COMMANDS:\n",
-                                    message,
-                                    flags=re.DOTALL,
-                                )
-                        message = message.replace("positional arguments:", "POSITIONAL ARGUMENTS:")
-
-                    message = self.make_subgroups(message)
-                    message = message.replace("options" if PYTHON_310_OR_HIGHER else "optional arguments", "OPTIONS:")
-                    lines = message.split("\n")
-                    inds = 1
-                    for i in range(1, len(lines)):
-                        if re.search("^[A-Z]", lines[i]):
-                            break
-                        if re.search(" +([{]|[.][.][.])", lines[i]):
-                            lines[i] = None
-                        else:
-                            inds += 1
-                    lines = [
-                        "\x1b[" + color + "m" + "\n".join([x for x in lines[:inds] if x is not None]) + "\x1b[0m"
-                    ] + lines[inds:]
-                    message = "\n".join([x for x in lines if x is not None])
-                    message = re.sub(
-                        "Default:.[^|]+",
-                        "\x1b[" + color + "m" + r"\g<0>" + "\x1b[0m",
-                        message,
-                        flags=re.DOTALL,
-                    )
-                    reg = r"(\n *-[a-zA-Z]) (.+, --)( \[[A-Z0-9. ]+\])?"
-                    message = re.sub(reg, "\x1b[" + color + "m" + r"\g<1>" + "\x1b[0m, --", message)
-                    reg = r", (--[^ ]+)"
-                    message = re.sub(reg, ", " + "\x1b[" + color + "m" + r"\g<1> " + "\x1b[0m", message)
-
-                    for reg in [
-                        "\n  -h, --help",
-                        "\n  {[^}]+}",
-                        "\n +--[^ ]+",
-                        "\n  {1,6}[a-z0-9A-Z_-]+",
-                    ]:
-                        message = re.sub(reg, "\x1b[" + color + "m" + r"\g<0>" + "\x1b[0m", message)
-                    file.write(message + "\n")
-                else:
-                    file.write("\x1b[" + color + "m" + message.strip() + "\x1b[0m\n")
-
-    def exit(self, status=0, message=None) -> None:
-        if message:
-            self._print_message(message, sys.stderr, self.color_dict["RED"])
-        sys.exit(status)
-
-    def error(self, message) -> None:
-        # otherwise it prints generic help but it should print the specific help of the subcommand
-        if "unrecognized arguments" in message:
-            multiple_args = message.count(" ") > 2
-            option_str = "Unknown option" if PYTHON_310_OR_HIGHER else "Unknown optional argument"
-
-            type_arg_msg = option_str if "-" in message else "Extra positional argument"
-            if multiple_args:
-                type_arg_msg += "(s)"
-            message = message.replace("unrecognized arguments", type_arg_msg)
-            with contextlib.suppress(SystemExit):
-                self.parse_args(sys.argv[1:-1] + ["--help"])
-        else:
-            self.print_help(sys.stderr)
-        self.exit(2, message)
 
 
 def get_desc_str(fn):
@@ -180,127 +59,21 @@ def add_group(parser_cmd, model, fn, var_name, abbrevs) -> None:
     pydantic_models[fn][var_name] = (model, kwargs)
 
 
-def get_var_names(var_name, abbrevs):
-    # adds shortenings when possible
-    if var_name.startswith("--"):
-        short = "-" + var_name[2]
-        # don't add shortening for inverted bools
-        if var_name.startswith(("--no-", "--no_")):
-            var_names = [var_name]
-        elif short not in abbrevs:
-            abbrevs.append(short)
-            var_names = [short, var_name]
-        elif short.upper() not in abbrevs:
-            abbrevs.append(short.upper())
-            var_names = [short.upper(), var_name]
-        else:
-            var_names = [var_name]
-    else:
-        var_names = [var_name]
-    return var_names
-
-
-def protobuf_tp_converter(tp):
-    def inner(x):
-        return tp.Value(x)
-
-    return inner
-
-
-def extract_type_from_union(tp):
-    """Extract the non-None type from a Union type or return the type as-is."""
-    # Handle string representation of union (e.g., 'X | None')
-    if isinstance(tp, str):
-        if " | None" in tp or "None | " in tp:
-            # This is a stringified union type, we can't use it as a callable
-            # Default to str for now
-            return str
-        return tp
-
-    # Handle Python 3.10+ union syntax (X | Y)
-    if isinstance(tp, types.UnionType):
-        # Find the non-None type in the union
-        args = tp.__args__
-        non_none_types = [arg for arg in args if arg is not type(None)]
-        if non_none_types:
-            return non_none_types[0]
-        return str  # Default to str if we can't find a proper type
-
-    # Handle typing.Union
-    if hasattr(tp, "__origin__") and tp.__origin__ is Union:
-        args = tp.__args__
-        non_none_types = [arg for arg in args if arg is not type(None)]
-        if non_none_types:
-            return non_none_types[0]
-        return str  # Default to str if we can't find a proper type
-
-    return tp
-
-
 def add_argument(parser_cmd, tp, container_type, var_name, default, arg_desc, abbrevs) -> None:
-    kwargs = {}
-    var_name = var_name if UNDERSCORE_DETECTED else var_name.replace("_", "-")
-    arg_desc = arg_desc.replace("%", "%%")
-    nargs = None
+    """Add an argument to the parser using the modern ArgumentBuilder approach."""
+    from cliche.type_utils import ArgumentBuilder, TypeInfo
 
-    # Extract the actual type from union types before processing, but only if it's actually a union
-    if (
-        isinstance(tp, types.UnionType)
-        or (hasattr(tp, "__origin__") and tp.__origin__ is Union)
-        or (isinstance(tp, str) and (" | " in tp or "None |" in tp or "| None" in tp))
-    ):
-        tp = extract_type_from_union(tp)
+    # Create TypeInfo from the resolved type information
+    type_info = TypeInfo(element_type=tp, type_name="", container_type=container_type)
 
-    if container_type:
-        with contextlib.suppress(AttributeError):
-            tp = tp.__args__[0]
-            # Only extract type from union if it's actually a union type
-            if (
-                isinstance(tp, types.UnionType)
-                or (hasattr(tp, "__origin__") and tp.__origin__ is Union)
-                or (isinstance(tp, str) and (" | " in tp or "None |" in tp or "| None" in tp))
-            ):
-                tp = extract_type_from_union(tp)
-        nargs = "*"
-    if tp is bool:
-        action = "store_true" if not default else "store_false"
-        var_names = get_var_names("--" + var_name, abbrevs)
-        parser_cmd.add_argument(*var_names, action=action, help=arg_desc)
-        return
-    try:
-        if isinstance(tp, tuple):
-            kwargs["action"] = DictAction
-        elif "EnumTypeWrapper" in str(tp):
-            kwargs["action"] = ProtoEnumAction
-        elif hasattr(tp, "__class__") and tp.__class__.__name__ == "EnumTypeWrapper":
-            # Another way to detect protobuf enums
-            kwargs["action"] = ProtoEnumAction
-        elif hasattr(tp, "_enum_type"):
-            # Yet another way to detect protobuf enums
-            kwargs["action"] = ProtoEnumAction
-        elif issubclass(tp, Enum):
-            kwargs["action"] = EnumAction
-            # txt = "|".join(tp.__members__)
-            # if len(txt) > 77:
-            #     txt = txt[:77] + "... "
-            # kwargs["metavar"] = txt
-    except TypeError:
-        pass
-    if default != "--1":
-        var_name = "--" + var_name
-    var_names = get_var_names(var_name, abbrevs)
-    if nargs == "*" and default == "--1":
-        default = container_type()
-    if container_type:
-        fn = parser_cmd.prog.split()[-1]
-        container_fn_name_to_type[(fn, var_name)] = container_type
-    # When using custom actions (DictAction, ProtoEnumAction, EnumAction),
-    # the type parameter should be passed to the action, not to add_argument
-    if "action" in kwargs and kwargs["action"] in [DictAction, ProtoEnumAction, EnumAction]:
-        kwargs["type"] = tp
-        parser_cmd.add_argument(*var_names, nargs=nargs, default=default, help=arg_desc, **kwargs)
-    else:
-        parser_cmd.add_argument(*var_names, type=tp, nargs=nargs, default=default, help=arg_desc, **kwargs)
+    # Use ArgumentBuilder for clean argument construction
+    (
+        ArgumentBuilder(parser_cmd, var_name, abbrevs, UNDERSCORE_DETECTED)
+        .with_type_info(type_info)
+        .with_default(default)
+        .with_description(arg_desc)
+        .build()
+    )
 
 
 def get_var_name_and_default(fn):
@@ -313,218 +86,18 @@ def get_var_name_and_default(fn):
         yield var_name, default
 
 
-def base_lookup(fn, tp, sans):
-    tp_ending = tuple(tp.split("."))
-    sans_ending = tuple(sans.split("."))
-    if fn.__qualname__ in class_init_lookup:
-        fn.lookup = class_init_lookup[fn.__qualname__]
-    if tp_ending in fn.lookup:
-        tp_name = tp
-        tp = fn.lookup[tp_ending]
-    elif sans_ending in fn.lookup:
-        tp_name = sans
-        tp = fn.lookup[sans_ending]
-    else:
-        tp_name = sans
-        tp = __builtins__.get(sans, sans)
-    return tp, tp_name
-
-
-def optional_pipe_lookup(fn, tp) -> None:
-    if tp.startswith("None | "):
-        sans_optional = tp[7:]
-    elif tp.endswith("| None"):
-        sans_optional = tp[:-7]
-    else:
-        msg = f"Optional confusion: {fn} {tp}"
-        raise Exception(msg)
-    return base_lookup(fn, tp, sans_optional)
-
-
-def optional_lookup(fn, tp):
-    if isinstance(tp, str) and "|" in tp:
-        return optional_pipe_lookup(fn, tp)
-    if type(tp).__name__ == "UnionType" or isinstance(tp, types.UnionType):
-        assert len(tp.__args__) == 2, "Union may at most have 2 types"
-        assert type(None) in tp.__args__, "Union must have one None"
-        a, b = tp.__args__
-        if type(a) == type(None):
-            b, a = a, b
-        return base_lookup(fn, a.__name__, a.__name__)
-    sans_optional = tp.replace("Optional[", "")
-    if tp != sans_optional:  # strip ]
-        sans_optional = sans_optional[:-1]
-    return base_lookup(fn, tp, sans_optional)
-
-
-def container_lookup(fn, tp, container_name):
-    sans_container = tp.replace(f"{container_name}[", "")
-    if tp != sans_container:  # strip ]
-        sans_container = sans_container[:-1].split(",")[0].strip()
-    return base_lookup(fn, tp, sans_container)
-
-
 def get_fn_info(fn, var_name, default):
+    """Extract type information for a function parameter."""
+    from cliche.type_utils import TypeResolver
+
     default_type = type(default) if default != "--1" and default is not None else None
+    annotation = fn.__annotations__.get(var_name, default_type or str)
 
-    # Always use raw annotations to preserve protobuf enum references
-    # get_type_hints() evaluates forward references too eagerly and breaks protobuf enums
-    tp = fn.__annotations__.get(var_name, default_type or str)
+    # Use the centralized TypeResolver
+    resolver = TypeResolver(fn, class_init_lookup=class_init_lookup)
+    type_info = resolver.resolve(annotation, default, default_type)
 
-    # Use typing helpers to extract container type and subtype
-    origin = get_origin(tp)
-    tp_args = get_args(tp)
-
-    # Set container_type from origin
-    container_type = origin or False
-    tp_name = "bugggg"  # Will be set later
-
-    # If typing helpers failed (protobuf enums), fall back to original string-based logic
-    if not container_type:
-        # Check if it's a string annotation for a container type
-        if isinstance(tp, str):
-            # Parse string annotations like "tuple[Location.V, ...]"
-            tp_lower = tp.lower()
-            for container_name, container_class in CONTAINER_MAPPING.items():
-                if container_name.lower() + "[" in tp_lower:
-                    container_type = container_class
-                    # Extract the inner type
-                    inner = tp[tp.find("[") + 1 : tp.rfind("]")]
-                    inner = inner.replace(", ...", "").strip()
-                    if "." in inner:
-                        # Resolve dotted names like Location.V
-                        # For protobuf enums, we want the enum type, not the value
-                        # So for "Location.V", we want to look up "Location"
-                        enum_name = inner.split(".")[0]
-                        tp, tp_name = base_lookup(fn, inner, enum_name)
-                        # If that didn't work, try looking up the enum directly
-                        if tp == inner and (enum_name,) in fn.lookup:
-                            tp = fn.lookup[(enum_name,)]
-                            tp_name = enum_name
-                    else:
-                        tp, tp_name = base_lookup(fn, inner, inner)
-                    tp_name = f"1 or more of: {tp_name}"
-                    break
-
-        # Use original logic for complex types like protobuf enums
-        if not container_type and default_type in [list, set, tuple, dict]:
-            container_type = default_type
-            if "typing" not in str(tp):
-                tp_args = ", ".join({type(x).__name__ for x in default}) or "str"
-                tp_name = "1 or more of: " + tp_args
-            else:
-                tp_args = ", ".join(x.__name__ for x in tp.__args__ if hasattr(x, "__name__"))
-                tp_name = "1 or more of: " + tp_args
-            if hasattr(tp, "__args__"):
-                tp = tp.__args__[0]
-            elif len({type(x) for x in default}) > 1:
-                tp = None
-            elif default:
-                if container_type is dict:
-                    tp = ((type(next(iter(default))),), (type(next(iter(default.values()))),))
-                else:
-                    tp = type(next(iter(default)))
-            else:
-                tp = str
-        else:
-            # Check if it's a string representation of a container type
-            tp_str = str(tp)
-            if "dict[" in tp_str.lower():
-                # Special handling for dict types
-                container_type = dict
-                if tp_str.lower().startswith("optional"):
-                    tp_str = tp_str[9:-1]
-                if "[" in tp_str and "]" in tp_str:
-                    dict_content = tp_str[tp_str.find("[") + 1 : tp_str.rfind("]")]
-                    if ", " in dict_content:
-                        key_type_str, value_type_str = dict_content.split(", ", 1)
-                        key_type = base_lookup(fn, tp_str, key_type_str.strip())[0]
-                        value_type = base_lookup(fn, tp_str, value_type_str.strip())[0]
-                        tp = ((key_type,), (value_type,))
-                        tp_name = f"dict[{key_type_str.strip()}, {value_type_str.strip()}]"
-                    else:
-                        tp = ((str,), (str,))
-                        tp_name = "dict[str, str]"
-                else:
-                    tp = ((str,), (str,))
-                    tp_name = "dict[str, str]"
-            else:
-                # Handle other container types
-                for container_name, container_class in CONTAINER_MAPPING.items():
-                    if container_name.lower() in tp_str.lower():
-                        tp, tp_name = container_lookup(fn, tp_str, container_name.lower())
-                        container_type = container_class
-                        tp_name = "1 or more of: " + tp_name
-                        break
-                else:
-                    # Handle simple types
-                    if tp == "str":
-                        tp = str
-                        tp_name = "str"
-                    elif tp.__class__.__name__ == "EnumTypeWrapper":
-                        tp_name = tp._enum_type.name
-                    elif hasattr(tp, "__name__"):
-                        tp_name = tp.__name__
-                    elif isinstance(tp, str) and base_lookup(fn, tp, "")[0]:
-                        tp, tp_name = base_lookup(fn, tp, "")
-                    else:
-                        tp, tp_name = optional_lookup(fn, tp)
-    elif tp_args:
-        if container_type is Union:
-            # Handle Union types (including Optional)
-            tp = tp_args[0]
-            tp_name = tp.__name__ if hasattr(tp, "__name__") else str(tp)
-            container_type = False  # Union isn't a container for CLI purposes
-        elif container_type is dict:
-            # For dict types, return tuple of ((key_type,), (value_type,))
-            if len(tp_args) >= 2:
-                tp = ((tp_args[0],), (tp_args[1],))
-                tp_name = f"dict[{tp_args[0].__name__}, {tp_args[1].__name__}]"
-            else:
-                tp = ((str,), (str,))
-                tp_name = "dict[str, str]"
-        else:
-            # For list, tuple, set, etc.
-            subtype = tp_args[0]
-
-            # Check if subtype is a protobuf enum
-            if hasattr(subtype, "__class__") and subtype.__class__.__name__ == "EnumTypeWrapper":
-                tp = subtype
-                tp_name = f"1 or more of: {subtype._enum_type.name}"
-            elif hasattr(subtype, "__name__") and not str(subtype).startswith("<"):
-                tp = subtype
-                tp_name = f"1 or more of: {subtype.__name__}"
-            else:
-                # Subtype might be an evaluated enum value (int) from Location.V
-                # Try to parse the original annotation string to get the enum type
-                tp_str = str(tp)
-                if "[" in tp_str and "." in tp_str:
-                    # Extract the type inside brackets
-                    inner = tp_str[tp_str.find("[") + 1 : tp_str.rfind("]")]
-                    # Remove ellipsis if present
-                    inner = inner.replace(", ...", "").strip()
-                    if "." in inner:
-                        # This might be something like "Location.V"
-                        # Use base_lookup to resolve it to the actual enum type
-                        resolved_tp, resolved_name = base_lookup(fn, inner, inner.split(".")[0])
-                        if resolved_tp != inner:  # Successfully resolved
-                            tp = resolved_tp
-                            tp_name = f"1 or more of: {resolved_name}"
-                        else:
-                            tp = str
-                            tp_name = "1 or more of: str"
-                    else:
-                        tp = str
-                        tp_name = "1 or more of: str"
-                else:
-                    tp = str
-                    tp_name = "1 or more of: str"
-    else:
-        # Container type without args, use str as default
-        tp = str
-        tp_name = "1 or more of: str"
-
-    return tp, tp_name, default, container_type
+    return type_info.element_type, type_info.type_name, default, type_info.container_type
 
 
 def add_arguments_to_command(cmd, fn, abbrevs=None):

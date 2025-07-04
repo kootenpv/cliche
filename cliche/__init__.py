@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.10.120"
+__version__ = "0.10.122"
 import sys
 import time
 import warnings
@@ -26,7 +26,6 @@ except ImportError:
 
 
 from cliche.argparser import (
-    ColoredHelpOnErrorParser,
     add_arguments_to_command,
     add_command,
     bool_inverted,
@@ -35,6 +34,7 @@ from cliche.argparser import (
     get_desc_str,
     pydantic_models,
 )
+from cliche.output import CleanArgumentParser
 from cliche.install import install, uninstall
 from cliche.using_underscore import UNDERSCORE_DETECTED
 
@@ -348,7 +348,7 @@ def get_parser():
     frame = currentframe().f_back
     module_doc = frame.f_code.co_consts[0]
     module_doc = module_doc if isinstance(module_doc, str) else None
-    parser = ColoredHelpOnErrorParser(description=module_doc)
+    parser = CleanArgumentParser(description=module_doc)
 
     from cliche import fn_registry
 
@@ -378,7 +378,7 @@ def get_parser():
                 for (fn_group, fn_name), (_decorated_fn, fn) in fn_registry.items():
                     if possible_group == fn_group:
                         cmd = add_command(subparsers, fn_name, fn)
-                        ColoredHelpOnErrorParser.sub_command = possible_group
+                        parser.sub_command = possible_group
                         group_known = True
             if subparsers is None:
                 subparsers = parser.add_subparsers(dest="command")
@@ -421,7 +421,7 @@ def main(exclude_module_names=None, version_info=None, *parser_args) -> None:
     #     spec = importlib.util.spec_from_file_location("pydantic", module_name)
     #     module = importlib.util.module_from_spec(spec)
     #     spec.loader.exec_module(module)
-    #     ColoredHelpOnErrorParser.module_name = module_name
+    #     parser.module_name = module_name
 
     if exclude_module_names is not None:
         # exclude module namespaces
@@ -448,12 +448,12 @@ def main(exclude_module_names=None, version_info=None, *parser_args) -> None:
     group = ""
     tool_name = os.path.basename(sys.argv[0])
     if the_group and the_cmd:
-        ColoredHelpOnErrorParser.sub_command = f"{tool_name} {the_group} {the_cmd}"
+        # Note: sub_command handling is now managed by OutputManager
         group = the_group
 
     elif old_sys_argv != sys.argv:
         group = old_sys_argv[1]
-        ColoredHelpOnErrorParser.sub_command = f"{tool_name} {group}"
+        # Note: sub_command handling is now managed by OutputManager
 
     if parser_args:
         parsed_args = parser.parse_args(parser_args)
