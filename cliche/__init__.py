@@ -34,8 +34,8 @@ from cliche.argparser import (
     get_desc_str,
     pydantic_models,
 )
-from cliche.output import CleanArgumentParser
 from cliche.install import install, uninstall
+from cliche.output import CleanArgumentParser
 from cliche.using_underscore import UNDERSCORE_DETECTED
 
 CLICHE_AFTER_INIT_TS = time.time()
@@ -104,6 +104,32 @@ def cli_info(**kwargs) -> None:
     print("Cliche:              ", highlight(python_dir + "/cliche"))
 
 
+def pip_info() -> None:
+    """Launch pip belonging to current Python executable"""
+    import os
+    import subprocess
+
+    python_dir = os.path.dirname(sys.executable)
+    pip_path = python_dir + "/pip"
+
+    # Check if pip exists at expected location
+    if not os.path.exists(pip_path):
+        # Fallback: try to find pip via python -m pip
+        try:
+            subprocess.call([sys.executable, "-m", "pip"] + sys.argv[2:])
+            return
+        except Exception as e:
+            print(f"Error: Could not find pip. {e}")
+            sys.exit(1)
+
+    # Execute pip with remaining arguments
+    try:
+        subprocess.call([pip_path] + sys.argv[2:])
+    except Exception as e:
+        print(f"Error executing pip: {e}")
+        sys.exit(1)
+
+
 # t1 = time.time()
 
 fn_registry = {}
@@ -118,6 +144,10 @@ the_cmd = ""
 
 if "--cli" in sys.argv:
     cli_info()
+    sys.exit(0)
+
+if "--pip" in sys.argv:
+    pip_info()
     sys.exit(0)
 
 if "--timing" in sys.argv:
@@ -184,6 +214,8 @@ def inner_cli(fn, group=""):
             kwargs.pop("cli")
         if "pdb" in kwargs:
             kwargs.pop("pdb")
+        if "pip" in kwargs:
+            kwargs.pop("pip")
         if "timing" in kwargs:
             kwargs.pop("timing")
         try:
@@ -267,6 +299,17 @@ def add_pdb(parser) -> None:
     )
 
 
+def add_pip(parser) -> None:
+    if [x for x in parser._actions if "--pip" in x.option_strings]:
+        return
+    parser.add_argument(
+        "--pip",
+        action="store_true",
+        default=False,
+        help=pip_info.__doc__,
+    )
+
+
 def add_timing(parser) -> None:
     if [x for x in parser._actions if "--timing" in x.option_strings]:
         return
@@ -314,6 +357,7 @@ def add_cliche_self_parser(parser) -> None:
     )
     add_cli(parser)
     add_pdb(parser)
+    add_pip(parser)
     add_timing(parser)
     bool_inverted.add("no_autocomplete")
     fn_registry[("", "install")] = [install, install]
@@ -339,6 +383,7 @@ def add_optional_cliche_arguments(cmd) -> None:
     add_traceback(group)
     add_cli(group)
     add_pdb(group)
+    add_pip(group)
     add_timing(group)
     add_raw(group)
 
@@ -446,7 +491,6 @@ def main(exclude_module_names=None, version_info=None, *parser_args) -> None:
         argcomplete.autocomplete(parser)
 
     group = ""
-    tool_name = os.path.basename(sys.argv[0])
     if the_group and the_cmd:
         # Note: sub_command handling is now managed by OutputManager
         group = the_group
@@ -511,7 +555,7 @@ def main(exclude_module_names=None, version_info=None, *parser_args) -> None:
                                 # Just convert the container type, preserving the already-processed values
                                 if isinstance(value, list) and container_fn_name_to_type[key] != list:
                                     kwargs[name] = container_fn_name_to_type[key](value)
-                                elif not isinstance(value, (list, tuple, set)):
+                                elif not isinstance(value, list | tuple | set):
                                     # Only apply container conversion if it's not already a container
                                     kwargs[name] = container_fn_name_to_type[key](value)
                 fn_registry[(group, cmd)][0](*starargs, **kwargs)
