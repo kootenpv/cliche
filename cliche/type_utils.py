@@ -23,8 +23,16 @@ def extract_type_from_union(tp):
     """Extract the non-None type from a Union type or return the type as-is."""
     # Handle string representation of union (e.g., 'X | None')
     if isinstance(tp, str):
-        if " | None" in tp or "None | " in tp:
-            return str  # Can't resolve string unions to callables
+        if " | None" in tp:
+            # Extract the non-None part from string like "int | None"
+            non_none_part = tp.replace(" | None", "").strip()
+            # Try to get the actual type from builtins
+            return __builtins__.get(non_none_part, str)
+        elif "None | " in tp:
+            # Extract the non-None part from string like "None | int"
+            non_none_part = tp.replace("None | ", "").strip()
+            # Try to get the actual type from builtins
+            return __builtins__.get(non_none_part, str)
         return tp
 
     # Handle Python 3.10+ union syntax (X | Y) and typing.Union
