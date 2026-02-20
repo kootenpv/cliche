@@ -101,37 +101,9 @@ def get_fn_info(fn, var_name, default):
 
 
 def add_arguments_to_command(cmd, fn, abbrevs=None):
-    doc_str = fn.__doc__ or ""
-    doc_params = parse_doc_params(doc_str)
-    abbrevs = abbrevs or ["-h"]
-    for var_name, default in get_var_name_and_default(fn):
-        tp, tp_name, default, container_type = get_fn_info(fn, var_name, default)
-        if is_pydantic(tp):
-            # msg = f"Cannot use pydantic just yet, argument {var_name!r} (type {tp.__name__}) on cmd {cmd.prog!r}"
-            # raise ValueError(msg)
-            add_group(cmd, tp, fn, var_name, abbrevs)
-            continue
-        doc_text = doc_params.get(var_name, "")
-        # changing the name to "no_X" in case the default is True for X, since we should set a flag to invert it
-        # e.g. --sums becomes --no-sums
-        if tp == bool and default is True:
-            var_name = "no_" + var_name
-            bool_inverted.add(var_name)
-            default = False
-            default_help = f"Default: {default} | " if default != "--1" else ""
-            default = True
-        else:
-            if isinstance(default, Enum):
-                default_fmt = default.name
-            elif default == "--1":
-                default_fmt = ""
-            elif container_type and "Wrapper" in str(tp) and default:
-                default_fmt = str(container_type([tp.Name(x) for x in default])).replace("'", "").replace('"', "")
-            elif "Wrapper" in str(tp) and default:
-                default_fmt = tp.Name(default)
-            else:
-                default_fmt = default
-            default_help = f"Default: {default_fmt} | " if default != "--1" else ""
-        arg_desc = f"|{tp_name}| {default_help}" + doc_text
-        add_argument(cmd, tp, container_type, var_name, default, arg_desc, abbrevs)
-    return abbrevs
+    """Add arguments from a function to a command parser."""
+    from cliche.argument_handler import ArgumentProcessor
+    
+    processor = ArgumentProcessor(fn, abbrevs)
+    processor.resolver.class_init_lookup = class_init_lookup
+    return processor.process_arguments(cmd)

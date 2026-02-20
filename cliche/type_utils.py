@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Union, get_args, get_origin
 
 # Container mappings
-CONTAINER_MAPPING = {"List": list, "Iterable": list, "Set": set, "Tuple": tuple}
+CONTAINER_MAPPING = {"List": list, "Iterable": list, "Set": set, "Tuple": tuple, "Dict": dict}
 CONTAINER_MAPPING.update({k.lower(): v for k, v in CONTAINER_MAPPING.items()})
 
 
@@ -24,15 +24,15 @@ def extract_type_from_union(tp):
     # Handle string representation of union (e.g., 'X | None')
     if isinstance(tp, str):
         if " | None" in tp:
-            # Extract the non-None part from string like "int | None"
+            # Extract the non-None part from string like "int | None" or "DateStr | None"
             non_none_part = tp.replace(" | None", "").strip()
-            # Try to get the actual type from builtins
-            return __builtins__.get(non_none_part, str)
+            # For custom types like DateStr, we can't resolve them from builtins
+            # Return the string so it can be resolved later via lookup
+            return non_none_part
         elif "None | " in tp:
             # Extract the non-None part from string like "None | int"
             non_none_part = tp.replace("None | ", "").strip()
-            # Try to get the actual type from builtins
-            return __builtins__.get(non_none_part, str)
+            return non_none_part
         return tp
 
     # Handle Python 3.10+ union syntax (X | Y) and typing.Union
@@ -310,6 +310,10 @@ class LookupResolver:
         if class_init_lookup and fn.__qualname__ in class_init_lookup:
             fn.lookup = class_init_lookup[fn.__qualname__]
 
+        # Check if fn.lookup exists
+        if not hasattr(fn, 'lookup'):
+            fn.lookup = {}
+
         if tp_ending in fn.lookup:
             tp_name = tp
             tp = fn.lookup[tp_ending]
@@ -317,8 +321,10 @@ class LookupResolver:
             tp_name = sans
             tp = fn.lookup[sans_ending]
         else:
+            # If not found, try to get from builtins
             tp_name = sans
-            tp = __builtins__.get(sans, sans)
+            builtin_type = __builtins__.get(sans) if isinstance(__builtins__, dict) else getattr(__builtins__, sans, None)
+            tp = builtin_type if builtin_type else sans
         return tp, tp_name
 
 
@@ -329,12 +335,16 @@ class TypeResolver:
         self.fn = fn
         self.class_init_lookup = class_init_lookup
         if base_lookup_fn:
-            self.base_lookup = base_lookup_fn
+            self._base_lookup_fn = base_lookup_fn
         else:
-            # Use partial application to pass class_init_lookup
-            from functools import partial
+            self._base_lookup_fn = None
 
-            self.base_lookup = partial(LookupResolver.resolve, class_init_lookup=class_init_lookup)
+    def base_lookup(self, fn, tp, sans=""):
+        """Wrapper that passes class_init_lookup dynamically."""
+        if self._base_lookup_fn:
+            return self._base_lookup_fn(fn, tp, sans)
+        else:
+            return LookupResolver.resolve(fn, tp, sans, self.class_init_lookup)
 
     def resolve(self, annotation, default_value, default_type) -> TypeInfo:
         """Main entry point for type resolution."""
@@ -405,6 +415,17 @@ class TypeResolver:
             key_type, value_type = tp_args[0], tp_args[1]
             return ((key_type,), (value_type,)), f"dict[{key_type.__name__}, {value_type.__name__}]"
 
+        # Handle string annotations like "dict[str, str]"
+        if isinstance(annotation, str) and "dict[" in annotation.lower():
+            # Extract key and value types from string
+            inner = annotation[annotation.find("[") + 1:annotation.rfind("]")]
+            if ", " in inner:
+                key_type_str, value_type_str = inner.split(", ", 1)
+                # Resolve the types
+                key_type, _ = self.base_lookup(self.fn, key_type_str.strip(), key_type_str.strip())
+                value_type, _ = self.base_lookup(self.fn, value_type_str.strip(), value_type_str.strip())
+                return ((key_type,), (value_type,)), f"dict[{key_type_str.strip()}, {value_type_str.strip()}]"
+
         if default_value:
             key_type = type(next(iter(default_value)))
             value_type = type(next(iter(default_value.values())))
@@ -420,21 +441,22 @@ class TypeResolver:
 
         if "." in inner_type:
             # Handle protobuf enum references like Location.V -> Location
+            # Extract just the enum name (e.g., "Exchange" from "Exchange.V")
             enum_name = inner_type.split(".")[0]
 
-            # Try direct lookup first
+            # Try direct lookup first - look up just the enum name, not with .V suffix
             if (enum_name,) in self.fn.lookup:
                 enum_type = self.fn.lookup[(enum_name,)]
                 return enum_type, f"1 or more of: {enum_name}"
-            elif (enum_name, "V") in self.fn.lookup:
-                enum_type = self.fn.lookup[(enum_name, "V")]
-                return enum_type, f"1 or more of: {enum_name}"
+            # Don't use (enum_name, "V") as this might return the value, not the type
             else:
-                # Fall back to base_lookup
-                resolved_type, resolved_name = self.base_lookup(self.fn, inner_type, enum_name)
-                if resolved_type == inner_type:
-                    resolved_type, resolved_name = self.base_lookup(self.fn, enum_name, enum_name)
-                return resolved_type, f"1 or more of: {resolved_name}"
+                # Fall back to base_lookup using just the enum name
+                resolved_type, resolved_name = self.base_lookup(self.fn, enum_name, enum_name)
+                # If we still couldn't resolve it, it might be a string
+                if isinstance(resolved_type, str):
+                    # Last resort: try the full inner_type
+                    resolved_type, resolved_name = self.base_lookup(self.fn, inner_type, enum_name)
+                return resolved_type, f"1 or more of: {resolved_name if resolved_name else enum_name}"
         else:
             # Simple type
             resolved_type, resolved_name = self.base_lookup(self.fn, inner_type, inner_type)
@@ -447,7 +469,11 @@ class TypeResolver:
         elif hasattr(annotation, "__name__"):
             return annotation, annotation.__name__
         elif isinstance(annotation, str):
+            # String annotation needs to be resolved through lookup
             resolved_type, resolved_name = self.base_lookup(self.fn, annotation, annotation)
+            # If the resolved type is a protobuf enum, get its proper name
+            if is_protobuf_enum(resolved_type):
+                resolved_name = resolved_type._enum_type.name if hasattr(resolved_type, '_enum_type') else resolved_name
             return resolved_type, resolved_name
         else:
             return annotation, str(annotation)

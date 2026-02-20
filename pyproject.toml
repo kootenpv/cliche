@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cliche"
-version = "0.10.124"
+version = "0.10.125"
 description = "A minimalistic CLI wrapper out to be the best"
 readme = "README.md"
 license = {text = "MIT"}
