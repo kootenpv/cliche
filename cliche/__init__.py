@@ -1,5 +1,5 @@
 __project__ = "cliche"
-__version__ = "0.10.125"
+__version__ = "0.10.126"
 import sys
 import time
 import warnings
@@ -66,6 +66,8 @@ def get_init(f):
 
 
 def highlight(x) -> str:
+    if not sys.stdout.isatty():
+        return str(x)
     return f"\x1b[1;36m{x}\x1b[0m"
 
 
@@ -119,14 +121,14 @@ def pip_info() -> None:
             subprocess.call([sys.executable, "-m", "pip"] + sys.argv[2:])
             return
         except Exception as e:
-            print(f"Error: Could not find pip. {e}")
+            print(f"Error: Could not find pip. {e}", file=sys.stderr)
             sys.exit(1)
 
     # Execute pip with remaining arguments
     try:
         subprocess.call([pip_path] + sys.argv[2:])
     except Exception as e:
-        print(f"Error executing pip: {e}")
+        print(f"Error executing pip: {e}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -156,12 +158,16 @@ if "--timing" in sys.argv:
     print(
         "timing cliche modules loading",
         CLICHE_AFTER_INIT_TS - CLICHE_INIT_TS,
+        file=sys.stderr,
     )
-    print("diff inits", CLICHE_AFTER_INIT_TS - sys.cliche_ts__)
+    print("diff inits", CLICHE_AFTER_INIT_TS - sys.cliche_ts__, file=sys.stderr)
 
 
 def warn(x) -> None:
-    sys.stderr.write("\033[31m" + x + "\033[0m\n")
+    if sys.stderr.isatty():
+        sys.stderr.write("\033[31m" + x + "\033[0m\n")
+    else:
+        sys.stderr.write(x + "\n")
     sys.stderr.flush()
 
 
@@ -235,7 +241,7 @@ def inner_cli(fn, group=""):
             else:
                 res = fn(*args, **kwargs)
             if use_timing:
-                print("timing function call success", time.time() - fn_time)
+                print("timing function call success", time.time() - fn_time, file=sys.stderr)
             if res is not None:
                 if raw:
                     print(res)
@@ -246,9 +252,9 @@ def inner_cli(fn, group=""):
                         print(res)
         except Exception as e:
             if use_timing:
-                print("timing function call success", time.time() - fn_time)
+                print("timing function call success", time.time() - fn_time, file=sys.stderr)
             fn_name, sig = fn.__module__ + "." + fn.__name__, signature(fn)
-            print(f"Fault while calling {fn_name}{sig} with the above arguments")
+            print(f"Fault while calling {fn_name}{sig} with the above arguments", file=sys.stderr)
             if no_traceback:
                 warn(traceback.format_exception_only(type(e), e)[-1].strip().split(" ", 1)[1])
                 sys.exit(1)
@@ -275,6 +281,7 @@ def inner_cli(fn, group=""):
             "since startup",
             time.time() - CLICHE_INIT_TS,
             new_module_text,
+            file=sys.stderr,
         )
     return fn
 
@@ -505,7 +512,7 @@ def main(exclude_module_names=None, version_info=None, *parser_args) -> None:
         parsed_args = parser.parse_args()
 
     if use_timing:
-        print("timing arg parsing", time.time() - t1)
+        print("timing arg parsing", time.time() - t1, file=sys.stderr)
 
     cmd = None
     if the_cmd:
@@ -532,7 +539,7 @@ def main(exclude_module_names=None, version_info=None, *parser_args) -> None:
         t2 = time.time()
         parser.print_help()
         if use_timing:
-            print("timing print help", time.time() - t2)
+            print("timing print help", time.time() - t2, file=sys.stderr)
     else:
         try:
             t3 = time.time()
@@ -560,11 +567,11 @@ def main(exclude_module_names=None, version_info=None, *parser_args) -> None:
                                     kwargs[name] = container_fn_name_to_type[key](value)
                 fn_registry[(group, cmd)][0](*starargs, **kwargs)
                 if use_timing:
-                    print("timing function call success", time.time() - t3)
+                    print("timing function call success", time.time() - t3, file=sys.stderr)
         except:
             if not use_pdb:
                 if use_timing:
-                    print("timing function call exception", time.time() - t3)
+                    print("timing function call exception", time.time() - t3, file=sys.stderr)
                 raise
             try:
                 import ipdb as pdb

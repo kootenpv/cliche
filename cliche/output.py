@@ -17,20 +17,22 @@ class ColorManager:
     }
     
     @classmethod
-    def colorize(cls, text: str, color: str) -> str:
-        """Apply color to text using ANSI codes."""
-        if color in cls.COLORS:
+    def colorize(cls, text: str, color: str, file=None) -> str:
+        """Apply color to text using ANSI codes. Skips colors if output is not a TTY."""
+        if file is None:
+            file = sys.stdout
+        if color in cls.COLORS and hasattr(file, "isatty") and file.isatty():
             return f"\x1b[{cls.COLORS[color]}m{text}\x1b[0m"
         return text
-    
+
     @classmethod
     def write_colored(cls, text: str, color: str = None, file=None) -> None:
         """Write colored text to file."""
         if file is None:
             file = sys.stderr
-        
+
         if color:
-            text = cls.colorize(text.strip(), color)
+            text = cls.colorize(text.strip(), color, file)
             file.write(text + "\n")
         else:
             file.write(text)
@@ -59,22 +61,22 @@ class MessageFormatter:
             
         return message
     
-    def format_help_message(self, message: str, sub_command: str = None) -> str:
+    def format_help_message(self, message: str, sub_command: str = None, file=None) -> str:
         """Format help messages with colors and structure."""
         message = message.strip()
-        
+
         if len(self.prog_name.split()) > 1:
             message = message.replace("positional arguments:", "POSITIONAL ARGUMENTS:")
         else:
             message = self._format_positional_arguments(message)
-        
+
         message = self._format_subgroups(message)
         message = self._format_options(message)
-        message = self._apply_help_colors(message)
-        
+        message = self._apply_help_colors(message, file)
+
         if hasattr(self, 'sub_command') and sub_command:
             message = message.replace(self.prog_name, sub_command)
-            
+
         return message
     
     def _format_positional_arguments(self, message: str) -> str:
@@ -115,8 +117,8 @@ class MessageFormatter:
         options_text = "options" if self.python_310_or_higher else "optional arguments"
         return message.replace(options_text, "OPTIONS:")
     
-    def _apply_help_colors(self, message: str) -> str:
-        """Apply color formatting to help text."""
+    def _apply_help_colors(self, message: str, file=None) -> str:
+        """Apply color formatting to help text. Skips colors if file is not a TTY."""
         lines = message.split("\n")
         inds = 1
         
@@ -132,33 +134,33 @@ class MessageFormatter:
         # Color the header section
         header_lines = [x for x in lines[:inds] if x is not None]
         if header_lines:
-            colored_header = ColorManager.colorize("\n".join(header_lines), "BLUE")
+            colored_header = ColorManager.colorize("\n".join(header_lines), "BLUE", file)
             lines = [colored_header] + lines[inds:]
-        
+
         # Rejoin message for further processing
         message = "\n".join([x for x in lines if x is not None])
-        
+
         # Color default values
         message = re.sub(
             r"Default:[^|]+",
-            lambda m: ColorManager.colorize(m.group(0), "BLUE"),
+            lambda m: ColorManager.colorize(m.group(0), "BLUE", file),
             message,
         )
-        
+
         # Color short options
         message = re.sub(
             r"(\n *-[a-zA-Z]) (.+, --)( \[[A-Z0-9. ]+\])?",
-            lambda m: ColorManager.colorize(m.group(1), "BLUE") + ", --",
+            lambda m: ColorManager.colorize(m.group(1), "BLUE", file) + ", --",
             message
         )
-        
-        # Color long options  
+
+        # Color long options
         message = re.sub(
             r", (--[^ ]+)",
-            lambda m: ", " + ColorManager.colorize(m.group(1), "BLUE") + " ",
+            lambda m: ", " + ColorManager.colorize(m.group(1), "BLUE", file) + " ",
             message
         )
-        
+
         # Color various help elements
         patterns = [
             r"\n  -h, --help",
@@ -166,14 +168,14 @@ class MessageFormatter:
             r"\n +--[^ ]+",
             r"\n  {1,6}[a-z0-9A-Z_-]+",
         ]
-        
+
         for pattern in patterns:
             message = re.sub(
                 pattern,
-                lambda m: ColorManager.colorize(m.group(0), "BLUE"),
+                lambda m: ColorManager.colorize(m.group(0), "BLUE", file),
                 message
             )
-        
+
         return message
     
     def format_error_message(self, message: str) -> str:
@@ -203,8 +205,7 @@ class HelpFormatter:
             file = sys.stdout
         
         help_text = parser.format_help()
-        formatted_help = self.message_formatter.format_help_message(help_text)
-        # Message is already colored, just write it directly
+        formatted_help = self.message_formatter.format_help_message(help_text, file=file)
         file.write(formatted_help + "\n")
 
 
@@ -224,6 +225,8 @@ class OutputManager:
     
     def print_error(self, message: str, file=None):
         """Print an error message."""
+        if file is None:
+            file = sys.stderr
         formatted_message = self.message_formatter.format_error_message(message)
         self.color_manager.write_colored(formatted_message, "RED", file)
     
