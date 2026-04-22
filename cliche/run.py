@@ -476,7 +476,7 @@ def _print_llm_output_json(commands: dict, subcommands: dict, enums: dict,
             '? = optional flag: use --name value (convert underscores to dashes). '
             f'Example: mds(exchange:X, base?:Y=Z) → {prog_name} mds binance_usdm --base BTC. '
             'bool? flags: --flag to enable, omit to use default. '
-            'Lists/tuples: space-separated after flag (--items a b c). '
+            'Lists/tuples/sets/frozensets: space-separated after flag (--items a b c). set/frozenset dedupe and do not preserve order. '
             'Output: stdout from print() is shown as-is; a non-None return value is auto-printed as JSON (or plain with --raw). '
             'Date/datetime defaults: `day: date = DateUtcArg("today")` / `when: datetime = DateTimeUtcArg("now")` re-eval per invocation; also "yesterday","tomorrow","+Nd","-Nd","+Nh","+Nm","YYYY-MM-DD". Non-Utc variants (DateArg/DateTimeArg) use local clock. Import from cliche. '
             'E section lists valid enum values. '
@@ -545,7 +545,7 @@ def _print_llm_output_lines(commands: dict, subcommands: dict, enums: dict,
     # Header with full instructions
     lines.append(f"# {prog_name} CLI - Run: {prog_name} <cmd> [args] (space-separated)")
     lines.append(f"# Syntax: fn(pos:Type, opt?:Type=default). No ? = positional arg. ? = optional --flag value.")
-    lines.append(f"# Bool flags shown as --flag or --no-flag (use as-is to toggle). Lists: --items a b c (space-separated).")
+    lines.append(f"# Bool flags shown as --flag or --no-flag (use as-is to toggle). Lists/tuples/sets/frozensets: --items a b c (space-separated; set/frozenset dedupe + unordered).")
     lines.append(f'# Date defaults: `day: date = DateUtcArg("today")` / `when: datetime = DateTimeUtcArg("now")` (also "yesterday","+Nd","-Nh","YYYY-MM-DD"; non-Utc variants use local clock).')
     lines.append(f"# Output: any print() inside the function goes to stdout; a non-None return value is auto-printed (JSON by default, plain with --raw).")
     lines.append(f"# For subcommands: {prog_name} <group> <function> [args]. Example: {prog_name} instruments overview")
@@ -626,7 +626,7 @@ def print_llm_command_help(func: dict, prog_name: str, cmd: str, group: str = No
 
     print(f"# {prog_name} {full_cmd} — LLM help")
     print(f"# Syntax: pos:Type (required positional), opt?:Type=default (use --opt value, underscores->dashes).")
-    print(f"# Bool: --flag to enable (default False) / --no-flag to disable (default True). Lists: space-separated.")
+    print(f"# Bool: --flag to enable (default False) / --no-flag to disable (default True). Lists/tuples/sets/frozensets: space-separated.")
     if clean_desc:
         first = clean_desc.strip().splitlines()[0].strip()
         if first:
@@ -724,12 +724,12 @@ def simplify_type_annotation(annotation: str) -> str:
 
 
 def is_multi_value_type(annotation: str) -> bool:
-    """Check if the type annotation suggests multiple values (tuple, list)."""
+    """Check if the type annotation suggests multiple values (tuple, list, set, frozenset)."""
     if not annotation:
         return False
-    # Check for tuple[...] or list[...] patterns
     lower = annotation.lower()
-    return lower.startswith('tuple[') or lower.startswith('list[')
+    return (lower.startswith('tuple[') or lower.startswith('list[')
+            or lower.startswith('set[') or lower.startswith('frozenset['))
 
 
 def _parse_date(s: str):
@@ -853,6 +853,13 @@ def type_from_annotation(annotation: str):
         inner = annotation[annotation.index('[') + 1 : annotation.rindex(']')].strip()
         inner = inner.strip('()').strip()
         # `tuple[int, ...]` — the element type is the first element.
+        inner = inner.split(',')[0].strip()
+        return type_map.get(inner, str)
+
+    if (annotation.startswith('set[') or annotation.startswith('Set[')
+            or annotation.startswith('frozenset[') or annotation.startswith('FrozenSet[')):
+        inner = annotation[annotation.index('[') + 1 : annotation.rindex(']')].strip()
+        inner = inner.strip('()').strip()
         inner = inner.split(',')[0].strip()
         return type_map.get(inner, str)
 
@@ -1423,7 +1430,15 @@ def convert_enum_args(func, kwargs, enums):
                     # to the container type that matches the annotation so the
                     # user function receives exactly what its signature says.
                     if isinstance(value, (list, tuple)):
-                        container = tuple if annotation.lstrip().startswith("tuple") else list
+                        ann_lstrip = annotation.lstrip()
+                        if ann_lstrip.startswith("tuple") or ann_lstrip.startswith("Tuple"):
+                            container = tuple
+                        elif ann_lstrip.startswith("frozenset") or ann_lstrip.startswith("FrozenSet"):
+                            container = frozenset
+                        elif ann_lstrip.startswith("set") or ann_lstrip.startswith("Set"):
+                            container = set
+                        else:
+                            container = list
                         kwargs[key] = container(
                             getattr(enum_cls, _to_member(v)) for v in value
                         )
@@ -1507,6 +1522,25 @@ def invoke_function(func, parsed_args, enums=None, pydantic_binds=None):
     # Convert enum string values to actual enum values
     if enums:
         kwargs = convert_enum_args(func, kwargs, enums)
+
+    # Non-enum container coercion: argparse always collects nargs='+'/'*' into
+    # a list, but the user's function may be annotated with set / frozenset /
+    # tuple. Wrap where needed so the received type matches the signature.
+    # (The enum path above already handles enum-typed collections.)
+    for param in params:
+        pname = param['name']
+        if pname not in kwargs:
+            continue
+        ann = (param.get('type_annotation') or '').lstrip()
+        value = kwargs[pname]
+        if not isinstance(value, list):
+            continue
+        if ann.startswith('frozenset[') or ann.startswith('FrozenSet['):
+            kwargs[pname] = frozenset(value)
+        elif ann.startswith('set[') or ann.startswith('Set['):
+            kwargs[pname] = set(value)
+        elif ann.startswith('tuple[') or ann.startswith('Tuple['):
+            kwargs[pname] = tuple(value)
 
     # Call the function (handle async functions)
     if inspect.iscoroutinefunction(fn):

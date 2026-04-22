@@ -145,6 +145,8 @@ rejected at the CLI boundary with a clear error, not deep inside your code.
 | `items: list[int]`                     | positional, `cmd 1 2 3`           | `list[int]`             |
 | `items: tuple[int, ...] = ()`          | `--items 1 2 3` (optional flag)   | `tuple[int, ...]`       |
 | `paths: tuple[Path, ...]`              | positional, nargs='+'             | `tuple[Path, ...]`      |
+| `ids: set[int]`                        | positional, `cmd 1 2 3` (dedup)   | `set[int]`              |
+| `tags: frozenset[str] = frozenset()`   | `--tags a b c` (optional, dedup)  | `frozenset[str]`        |
 | `tags: dict[str, int] = {}`            | `--tags a=1 b=2`                  | `dict[str, int]`        |
 | `m: MyEnum`                            | positional, choices               | enum member             |
 | `m: MyProtoEnum` (from `*_pb2.py`)     | positional, choices               | protobuf enum int value |
@@ -594,8 +596,9 @@ Both support `--models claude,gemini,codex,qwen` (qwen via
    scanning, but so Python doesn't `NameError` on the decorator).
 2. **`bool = True` becomes `--no-flag`, not `--flag`.** True is already the
    default; there's no way to "set True" on the CLI.
-3. **List/tuple positionals consume the rest of argv** (`nargs='+'`/`'*'`).
-   Put them last in the signature.
+3. **Collection positionals (list/tuple/set/frozenset) consume the rest of argv**
+   (`nargs='+'`/`'*'`). Put them last in the signature. `set[T]` / `frozenset[T]`
+   dedupe and lose argv order — use `list[T]` / `tuple[T, ...]` if either matters.
 4. **Pick `return` OR `print(...)`, not both** — a non-None return is
    auto-JSON-printed; `print()` on top duplicates output.
 5. **Functions named `help` shadow `--help`.** Rename or wrap in a group.
