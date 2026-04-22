@@ -17,6 +17,8 @@ pushes it; opt out with `--no-tag` / `--no-push`.
 from __future__ import annotations
 
 import argparse
+import configparser
+import os
 import re
 import shutil
 import subprocess
@@ -39,6 +41,26 @@ def _require_uv() -> str:
 def _run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
     print("$", " ".join(cmd), flush=True)
     return subprocess.run(cmd, check=check)
+
+
+def _load_pypirc_token(section: str) -> tuple[str | None, str | None]:
+    """Read ~/.pypirc and return (username, password) for the given section.
+
+    uv publish doesn't read ~/.pypirc (twine does). Bridge it by exporting
+    UV_PUBLISH_TOKEN / UV_PUBLISH_USERNAME / UV_PUBLISH_PASSWORD so the user's
+    existing twine config keeps working.
+    """
+    pypirc = Path.home() / ".pypirc"
+    if not pypirc.exists():
+        return None, None
+    cp = configparser.ConfigParser()
+    try:
+        cp.read(pypirc)
+    except configparser.Error:
+        return None, None
+    if section not in cp:
+        return None, None
+    return cp[section].get("username"), cp[section].get("password")
 
 
 def _read_version() -> str:
@@ -81,7 +103,23 @@ def cmd_deploy(args: argparse.Namespace) -> None:
     publish_cmd = [uv, "publish"]
     if args.test:
         publish_cmd += ["--publish-url", "https://test.pypi.org/legacy/"]
-    _run(publish_cmd)
+
+    # Bridge ~/.pypirc → UV_PUBLISH_* env vars (uv doesn't read .pypirc itself).
+    # Env vars already set win — don't clobber them.
+    env = os.environ.copy()
+    if "UV_PUBLISH_TOKEN" not in env and "UV_PUBLISH_PASSWORD" not in env:
+        section = "testpypi" if args.test else "pypi"
+        user, password = _load_pypirc_token(section)
+        if password:
+            if user == "__token__" or password.startswith("pypi-"):
+                env["UV_PUBLISH_TOKEN"] = password
+            else:
+                env["UV_PUBLISH_USERNAME"] = user or ""
+                env["UV_PUBLISH_PASSWORD"] = password
+            print(f"(using credentials from ~/.pypirc [{section}])")
+
+    print("$", " ".join(publish_cmd), flush=True)
+    subprocess.run(publish_cmd, check=True, env=env)
 
     tag = f"v{version}"
     if not args.no_tag:
