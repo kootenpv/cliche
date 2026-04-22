@@ -19,6 +19,14 @@ docs/_static/*
 /pip-selfcheck.json
 .tox/
 .cache
+cliche_cache*.json
 .coverage
 .coverage.*
 .coveralls.yml
+ralph/attempts/
+ralph/logs/
+ralph/proposals/
+ralph/problems/
+ralph/solved/
+deploy.py
+uv.lock

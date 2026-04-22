@@ -1,59 +1,28 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "cliche"
-version = "0.10.126"
-description = "A minimalistic CLI wrapper out to be the best"
-readme = "README.md"
-license = {text = "MIT"}
-authors = [
-    {name = "Pascal van Kooten", email = "kootenpv@gmail.com"}
-]
+version = "0.20.0"
+description = "Fast CLI generator"
 requires-python = ">=3.10"
-dependencies = [
-    "ipdb==0.13.13"
+license = "MIT"
+authors = [
+    { name = "Pascal" }
 ]
-classifiers = [
-    "Environment :: Console",
-    "Intended Audience :: Developers",
-    "Intended Audience :: Customer Service",
-    "Intended Audience :: System Administrators",
-    "Operating System :: Microsoft",
-    "Operating System :: MacOS :: MacOS X",
-    "Operating System :: Unix",
-    "Operating System :: POSIX",
-    "Programming Language :: Python",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.4",
-    "Programming Language :: Python :: 3.5",
-    "Programming Language :: Python :: 3.6",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Topic :: Software Development",
-    "Topic :: Software Development :: Build Tools",
-    "Topic :: Software Development :: Debuggers",
-    "Topic :: Software Development :: Libraries",
-    "Topic :: Software Development :: Libraries :: Python Modules",
-    "Topic :: System :: Software Distribution",
-    "Topic :: System :: Systems Administration",
-    "Topic :: Utilities",
-]
+dependencies = ["argcomplete"]
 
-[project.urls]
-Homepage = "https://github.com/kootenpv/cliche"
+[project.optional-dependencies]
+debug = ["ipdb"]
+test = ["pytest", "pydantic", "mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
 
 [project.scripts]
-cliche = "cliche.__init__:main"
+cliche = "cliche.install:main_cli"
 
-[tool.setuptools]
+[tool.hatch.build.targets.wheel]
 packages = ["cliche"]
-include-package-data = true
-zip-safe = false
-platforms = ["any"]
-
-[tool.setuptools.package-data]
-"*" = ["*"]
