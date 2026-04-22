@@ -108,15 +108,18 @@ def cmd_deploy(args: argparse.Namespace) -> None:
     # Env vars already set win — don't clobber them.
     env = os.environ.copy()
     if "UV_PUBLISH_TOKEN" not in env and "UV_PUBLISH_PASSWORD" not in env:
-        section = "testpypi" if args.test else "pypi"
-        user, password = _load_pypirc_token(section)
-        if password:
-            if user == "__token__" or password.startswith("pypi-"):
-                env["UV_PUBLISH_TOKEN"] = password
-            else:
-                env["UV_PUBLISH_USERNAME"] = user or ""
-                env["UV_PUBLISH_PASSWORD"] = password
-            print(f"(using credentials from ~/.pypirc [{section}])")
+        # twine renamed the test section from "pypitest" to "testpypi"; accept both.
+        candidates = ["testpypi", "pypitest"] if args.test else ["pypi"]
+        for section in candidates:
+            user, password = _load_pypirc_token(section)
+            if password:
+                if user == "__token__" or password.startswith("pypi-"):
+                    env["UV_PUBLISH_TOKEN"] = password
+                else:
+                    env["UV_PUBLISH_USERNAME"] = user or ""
+                    env["UV_PUBLISH_PASSWORD"] = password
+                print(f"(using credentials from ~/.pypirc [{section}])")
+                break
 
     print("$", " ".join(publish_cmd), flush=True)
     subprocess.run(publish_cmd, check=True, env=env)

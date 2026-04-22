@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./resources/logo.gif" alt="cliche logo"/>
+  <img src="https://raw.githubusercontent.com/kootenpv/cliche/master/resources/logo.gif" alt="cliche logo"/>
 </p>
 
 # cliche
@@ -376,7 +376,7 @@ def deploy(env: str, dry_run: bool = False):
 docstring, `--help` updates on next run. `--help` renders with color, short-
 flag hints, type markers, and defaults so users can scan it fast:
 
-![rendered help output](./resources/cliche_rendered.png)
+![rendered help output](https://raw.githubusercontent.com/kootenpv/cliche/master/resources/cliche_rendered.png)
 
 ## Returning vs printing
 

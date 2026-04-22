@@ -4,14 +4,37 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cliche"
-version = "0.20.0"
+version = "0.20.1"
 description = "Fast CLI generator"
+readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [
     { name = "Pascal" }
 ]
+keywords = ["cliche", "cli", "command-line", "argparse", "typer", "click", "fire"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Utilities",
+]
 dependencies = ["argcomplete"]
+
+[project.urls]
+Homepage = "https://github.com/kootenpv/cliche"
+Repository = "https://github.com/kootenpv/cliche"
+Issues = "https://github.com/kootenpv/cliche/issues"
 
 [project.optional-dependencies]
 debug = ["ipdb"]
