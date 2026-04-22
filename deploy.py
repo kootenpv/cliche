@@ -162,6 +162,14 @@ def cmd_release(args: argparse.Namespace) -> None:
         sys.exit("error: unstaged changes in tracked files. "
                  "stage them (git add) or stash/revert before releasing.")
 
+    # Also require at least one staged change. `release` is for bundling real
+    # work with the version bump; if nothing is staged, the user wants
+    # `bump --commit` + `deploy` instead.
+    staged = subprocess.run(["git", "diff", "--cached", "--quiet"]).returncode
+    if not staged:
+        sys.exit("error: nothing staged. `release` bundles staged changes into the release commit. "
+                 "either stage files (git add) or use `bump --commit` + `deploy` for a plain version-only release.")
+
     # 1. Bump version in pyproject.toml.
     before = _read_version()
     _run([uv, "version", "--bump", args.part, "--frozen"])
