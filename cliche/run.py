@@ -127,7 +127,7 @@ def _resolve_pkg_version(pkg_name=None, install_dir=None):
 def _collect_cli_info(cache_path=None, pkg_name=None, install_dir=None) -> list:
     """Return [(label, value), ...] describing the CLI + Python environment.
 
-    Shared by --cli (human-readable dump) and --llm (commented header above
+    Shared by --cli (human-readable dump) and --llm-help (commented header above
     the spec), so both surfaces stay in sync.
     """
     import os
@@ -480,8 +480,8 @@ def _print_llm_output_json(commands: dict, subcommands: dict, enums: dict,
             'Output: stdout from print() is shown as-is; a non-None return value is auto-printed as JSON (or plain with --raw). '
             'Date/datetime defaults: `day: date = DateUtcArg("today")` / `when: datetime = DateTimeUtcArg("now")` re-eval per invocation; also "yesterday","tomorrow","+Nd","-Nd","+Nh","+Nm","YYYY-MM-DD". Non-Utc variants (DateArg/DateTimeArg) use local clock. Import from cliche. '
             'E section lists valid enum values. '
-            f'For per-command detail (signature, types, defaults, docstrings) run: {prog_name} <cmd> --llm '
-            f'(or {prog_name} <group> <cmd> --llm for subcommands).'
+            f'For per-command detail (signature, types, defaults, docstrings) run: {prog_name} <cmd> --llm-help '
+            f'(or {prog_name} <group> <cmd> --llm-help for subcommands).'
         ),
         'ts': timestamp,
         'install_dir': install_dir or '',
@@ -549,7 +549,7 @@ def _print_llm_output_lines(commands: dict, subcommands: dict, enums: dict,
     lines.append(f'# Date defaults: `day: date = DateUtcArg("today")` / `when: datetime = DateTimeUtcArg("now")` (also "yesterday","+Nd","-Nh","YYYY-MM-DD"; non-Utc variants use local clock).')
     lines.append(f"# Output: any print() inside the function goes to stdout; a non-None return value is auto-printed (JSON by default, plain with --raw).")
     lines.append(f"# For subcommands: {prog_name} <group> <function> [args]. Example: {prog_name} instruments overview")
-    lines.append(f"# Per-command detail (full signature, types, defaults, docstrings): {prog_name} <cmd> --llm  or  {prog_name} <group> <cmd> --llm")
+    lines.append(f"# Per-command detail (full signature, types, defaults, docstrings): {prog_name} <cmd> --llm-help  or  {prog_name} <group> <cmd> --llm-help")
     lines.append(f"# now: {timestamp} | working_directory: {cwd or ''}")
     if install_dir:
         lines.append(f"# install_dir: {install_dir}")
@@ -670,12 +670,12 @@ def print_llm_command_help(func: dict, prog_name: str, cmd: str, group: str = No
     print("## global options")
     print("--pdb: debugger on error | --pip ARGS: pip for this env | --uv ARGS: uv for this env | --pyspy N: profile Ns")
     print("--raw: plain output (no JSON/color) | --notraceback: terse errors")
-    print("--timing: timing info | --skip-gen: skip cache regen | --version: package version | --cli: version info | --llm: this view")
+    print("--timing: timing info | --skip-gen: skip cache regen | --version: package version | --cli: version info | --llm-help: this view")
 
 
 def print_help(commands, subcommands, prog_name: str = "run.py"):
     """Print help similar to 1one --help."""
-    print(f"{Colors.blue(f'usage: {prog_name} [-h] [--llm] [--pdb] [--pip] [--uv] [--pyspy N] [--timing] COMMAND ...')}\n")
+    print(f"{Colors.blue(f'usage: {prog_name} [-h] [--llm-help] [--pdb] [--pip] [--uv] [--pyspy N] [--timing] COMMAND ...')}\n")
     print("COMMANDS:")
     for name in sorted(commands.keys()):
         doc = get_docstring_first_line(commands[name])
@@ -695,7 +695,7 @@ def print_help(commands, subcommands, prog_name: str = "run.py"):
     print(f"  {Colors.blue('-h')}, {Colors.blue('--help')}    Show this help message")
     print(f"  {Colors.blue('--version')}     Print the package version and exit")
     print(f"  {Colors.blue('--cli')}         Show CLI and Python version info (including package version)")
-    print(f"  {Colors.blue('--llm')}         Show compact LLM-friendly help output")
+    print(f"  {Colors.blue('--llm-help')}         Show compact LLM-friendly help output")
     print(f"  {Colors.blue('--pdb')}         Drop into debugger on error")
     print(f"  {Colors.blue('--pip')}         Run pip for this CLI's Python environment")
     print(f"  {Colors.blue('--uv')}          Run uv targeting this CLI's Python environment")
@@ -1718,10 +1718,10 @@ def main():
     if skip_gen:
         sys.argv.remove('--skip-gen')
 
-    # Check for --llm flag
-    show_llm = '--llm' in sys.argv
+    # Check for --llm-help flag
+    show_llm = '--llm-help' in sys.argv
     if show_llm:
-        sys.argv.remove('--llm')
+        sys.argv.remove('--llm-help')
         CleanArgumentParser.llm_mode = True
 
     # Regenerate cache if SOURCE_DIR is set and not skipping
@@ -1838,7 +1838,7 @@ def main():
 
         argcomplete.autocomplete(parser)
 
-    # Handle --llm help output (only when no args to execute)
+    # Handle --llm-help help output (only when no args to execute)
     if show_llm and (len(sys.argv) < 2 or sys.argv[1] in ('-h', '--help')):
         print_llm_output(commands, subcommands, enums, prog_name=prog_name,
                          install_dir=INSTALL_DIR, cwd=os.getcwd(),
@@ -1854,7 +1854,7 @@ def main():
 
     cmd = sys.argv[1].replace('_', '-')
 
-    # Handle --llm on a specific command/group (with or without -h). Detailed per-param output.
+    # Handle --llm-help on a specific command/group (with or without -h). Detailed per-param output.
     if show_llm:
         if cmd in commands:
             print_llm_command_help(commands[cmd], prog_name, cmd)

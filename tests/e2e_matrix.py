@@ -55,6 +55,6 @@ E2E_ARGV_MATRIX: dict[str, list[str]] = {
 
     # discovery
     "help":               ["--help"],
-    "llm":                ["--llm"],
+    "llm":                ["--llm-help"],
     "cli_info":           ["--cli"],
 }

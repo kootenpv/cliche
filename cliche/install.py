@@ -1757,14 +1757,14 @@ description` lines are parsed into per-argument help text.
 ## Built-in global flags (always available)
     -h, --help        Standard help
     --cli             Show CLI + Python version info
-    --llm             Print compact LLM-friendly help (all commands + enums)
+    --llm-help             Print compact LLM-friendly help (all commands + enums)
     --pdb             Drop into (i)pdb post-mortem on exception
     --pip [args]      Run pip from the CLI's Python env (e.g. `mytool --pip list`)
     --pyspy N         Profile for N seconds, write speedscope JSON
     --timing          Print detailed startup / parse timings to stderr
     --skip-gen        Skip cache regeneration this invocation
 
-Note: `mytool --llm` is the canonical way an LLM can discover every command,
+Note: `mytool --llm-help` is the canonical way an LLM can discover every command,
 signature, default, and enum. Prefer it over `--help` for machine consumption.
 
 ## Layout rules
@@ -1833,7 +1833,7 @@ Then:
     cliche install my_tool
     my_tool greet Alice --shout
     my_tool db migrate --mode FAST --steps 3
-    my_tool --llm         # discover everything
+    my_tool --llm-help         # discover everything
 """
 
 
@@ -2142,7 +2142,7 @@ def main_cli():
         print(_v)
         return
     parser.add_argument(
-        "--llm",
+        "--llm-help",
         action="store_true",
         help="Print an LLM-oriented guide to building tools with cliche, then exit",
     )
@@ -2185,7 +2185,7 @@ def main_cli():
 
     args = parser.parse_args()
 
-    if args.llm:
+    if args.llm_help:
         print(LLM_GUIDE)
         return
 

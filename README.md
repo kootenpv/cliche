@@ -49,7 +49,7 @@ Docstrings become `--help` text. No re-declaration.
 - **No imports at scan time** — `@cli` is detected from source text, so
   scanning doesn't execute your code. 100 files with heavy top-level imports
   still launches instantly.
-- **LLM-friendly from day one** — every installed CLI ships with a `--llm`
+- **LLM-friendly from day one** — every installed CLI ships with a `--llm-help`
   flag that dumps a compact spec of commands, signatures, defaults, and enum
   values.
 
@@ -79,7 +79,7 @@ cliche install mytool     # generates pyproject.toml + pip install -e .
 mytool greet world            # → hello world
 mytool greet world --loud     # → HELLO WORLD
 mytool --help                 # standard argparse help
-mytool --llm                  # LLM-readable doc
+mytool --llm-help                  # LLM-readable doc
 ```
 
 Editing source takes effect immediately (editable install). No reinstall when
@@ -464,7 +464,7 @@ Every installed CLI gets these for free:
 |-----------------|------------------------------------------------------------------------|
 | `-h, --help`    | Standard help                                                          |
 | `--cli`         | CLI + Python version info, autocomplete status, cache location         |
-| `--llm`         | Compact LLM-friendly help: every command, signature, enum, default     |
+| `--llm-help`         | Compact LLM-friendly help: every command, signature, enum, default     |
 | `--raw`         | Plain `print()` of the return value — good for pipes                   |
 | `--notraceback` | On error, print only `ExcName: message`                                |
 | `--pdb`         | Post-mortem on exception (prefers `ipdb` via `[debug]` extra)          |
@@ -473,7 +473,7 @@ Every installed CLI gets these for free:
 | `--timing`      | Detailed startup + import + invoke timing to stderr                    |
 | `--skip-gen`    | Skip cache regeneration for this invocation                            |
 
-`--llm` is the canonical way for an LLM or script to enumerate your tool.
+`--llm-help` is the canonical way for an LLM or script to enumerate your tool.
 Benchmark (`scripts/bench_llm_parsing.py`) shows Claude/Gemini/Codex generate
 100% valid commands from it.
 
@@ -568,19 +568,19 @@ every save.
 
 ## Integration with LLMs
 
-Every CLI gets `--llm` for free:
+Every CLI gets `--llm-help` for free:
 
 ```bash
-mytool --llm > spec.txt
+mytool --llm-help > spec.txt
 # pass spec.txt as context to a model:
 # "Given this CLI spec, write 5 commands to accomplish <goal>."
 ```
 
 Two benchmarks in `scripts/` measure round-trip quality:
 
-- `bench_llm_parsing.py` — do models correctly consume `--llm` and emit valid
+- `bench_llm_parsing.py` — do models correctly consume `--llm-help` and emit valid
   argv for the described CLI?
-- `bench_llm_library_gen.py` — given the `cliche --llm` guide, can models
+- `bench_llm_library_gen.py` — given the `cliche --llm-help` guide, can models
   generate *working* library source that installs and runs?
 
 Both support `--models claude,gemini,codex,qwen` (qwen via
@@ -638,7 +638,7 @@ Everything else should just work.
 cliche install <binary>    Install a CLI
 cliche uninstall <binary>  Uninstall (supports --pkg for disambiguation)
 cliche ls                  List every @cli CLI in this env
-cliche --llm               Print the full guide (for LLM consumption)
+cliche --llm-help               Print the full guide (for LLM consumption)
 ```
 
 ---
