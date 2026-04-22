@@ -4,6 +4,7 @@
 Usage:
     python deploy.py bump {patch,minor,major}      [--commit]
     python deploy.py deploy                        [--test] [--no-tag] [--no-push]
+    python deploy.py release {patch,minor,major} -m MSG  [--test] [--no-push]
 
 `bump` delegates to `uv version --bump <part>`, which rewrites the
 `version = "..."` line in pyproject.toml (single source of truth —
@@ -13,6 +14,12 @@ bump is allowed to be breaking; post-1.0 follow semver strictly.
 `deploy` runs `uv build` and `uv publish` on the already-bumped version.
 Pass `--test` to route to TestPyPI. By default it also tags `vX.Y.Z` and
 pushes it; opt out with `--no-tag` / `--no-push`.
+
+`release` is the one-shot: bump + single commit including your staged files
++ tag + build + publish + push. Use when you want staged changes and the
+version bump to land in the same commit. Build runs before the commit so a
+broken build fails fast; publish runs after tag, so on publish failure you
+can `git reset HEAD~1 && git tag -d vX.Y.Z` locally and retry.
 """
 from __future__ import annotations
 
@@ -88,28 +95,25 @@ def cmd_bump(args: argparse.Namespace) -> None:
         print(f"committed + tagged v{after} (push with: git push && git push --tags)")
 
 
-def cmd_deploy(args: argparse.Namespace) -> None:
-    uv = _require_uv()
-    version = _read_version()
-
-    # Clean any stale dist/ so an old wheel can't slip into the upload.
+def _clean_dist() -> None:
+    """Remove stale dist/ contents so an old wheel can't slip into the upload."""
     dist = ROOT / "dist"
     if dist.exists():
         for f in dist.iterdir():
             f.unlink()
 
-    _run([uv, "build"])
 
+def _publish(uv: str, test: bool) -> None:
+    """Run `uv publish`, bridging ~/.pypirc → UV_PUBLISH_* env vars."""
     publish_cmd = [uv, "publish"]
-    if args.test:
+    if test:
         publish_cmd += ["--publish-url", "https://test.pypi.org/legacy/"]
 
-    # Bridge ~/.pypirc → UV_PUBLISH_* env vars (uv doesn't read .pypirc itself).
     # Env vars already set win — don't clobber them.
     env = os.environ.copy()
     if "UV_PUBLISH_TOKEN" not in env and "UV_PUBLISH_PASSWORD" not in env:
         # twine renamed the test section from "pypitest" to "testpypi"; accept both.
-        candidates = ["testpypi", "pypitest"] if args.test else ["pypi"]
+        candidates = ["testpypi", "pypitest"] if test else ["pypi"]
         for section in candidates:
             user, password = _load_pypirc_token(section)
             if password:
@@ -124,6 +128,15 @@ def cmd_deploy(args: argparse.Namespace) -> None:
     print("$", " ".join(publish_cmd), flush=True)
     subprocess.run(publish_cmd, check=True, env=env)
 
+
+def cmd_deploy(args: argparse.Namespace) -> None:
+    uv = _require_uv()
+    version = _read_version()
+
+    _clean_dist()
+    _run([uv, "build"])
+    _publish(uv, args.test)
+
     tag = f"v{version}"
     if not args.no_tag:
         # Tolerate: tag may already exist if `bump --commit` created it.
@@ -134,6 +147,54 @@ def cmd_deploy(args: argparse.Namespace) -> None:
 
     target = "TestPyPI" if args.test else "PyPI"
     print(f"done: published {version} to {target}")
+
+
+def cmd_release(args: argparse.Namespace) -> None:
+    """One-shot: bump + staged files into a single commit + tag + build + publish + push."""
+    uv = _require_uv()
+
+    # 0. Refuse if there are unstaged changes to tracked files — the release
+    #    commit only picks up what's staged + the pyproject.toml bump, and
+    #    silently leaving other edits behind would be surprising. Untracked
+    #    files are allowed (user decides what to add).
+    dirty = subprocess.run(["git", "diff", "--quiet"]).returncode
+    if dirty:
+        sys.exit("error: unstaged changes in tracked files. "
+                 "stage them (git add) or stash/revert before releasing.")
+
+    # 1. Bump version in pyproject.toml.
+    before = _read_version()
+    _run([uv, "version", "--bump", args.part, "--frozen"])
+    version = _read_version()
+    tag = f"v{version}"
+    print(f"bumped: {before} → {version}")
+
+    # 2. Build now — fail fast if the tree is broken, before touching git.
+    _clean_dist()
+    _run([uv, "build"])
+
+    # 3. Stage pyproject.toml alongside whatever the user already staged,
+    #    then single commit + tag.
+    _run(["git", "add", str(PYPROJECT)])
+    _run(["git", "commit", "-m", f"{args.message} (v{version})"])
+    _run(["git", "tag", tag])
+
+    # 4. Publish. If this fails, the commit/tag exist locally but not on
+    #    remote — roll back with: git tag -d vX.Y.Z && git reset HEAD~1
+    try:
+        _publish(uv, args.test)
+    except subprocess.CalledProcessError:
+        print(f"\npublish failed. to roll back locally:", file=sys.stderr)
+        print(f"    git tag -d {tag} && git reset --soft HEAD~1", file=sys.stderr)
+        sys.exit(1)
+
+    # 5. Push commit + tag.
+    if not args.no_push:
+        _run(["git", "push"])
+        _run(["git", "push", "origin", tag])
+
+    target = "TestPyPI" if args.test else "PyPI"
+    print(f"done: released {version} to {target}")
 
 
 def main() -> None:
@@ -153,6 +214,17 @@ def main() -> None:
     d.add_argument("--no-tag", action="store_true", help="Skip `git tag vX.Y.Z`")
     d.add_argument("--no-push", action="store_true", help="Skip `git push` / tag push")
     d.set_defaults(func=cmd_deploy)
+
+    r = sub.add_parser(
+        "release",
+        help="One-shot: bump + single commit with staged files + tag + build + publish + push",
+    )
+    r.add_argument("part", choices=["patch", "minor", "major"])
+    r.add_argument("-m", "--message", required=True,
+                   help="Commit message (version suffix is appended automatically).")
+    r.add_argument("--test", action="store_true", help="Publish to TestPyPI instead of PyPI")
+    r.add_argument("--no-push", action="store_true", help="Skip `git push` / tag push")
+    r.set_defaults(func=cmd_release)
 
     args = parser.parse_args()
     args.func(args)
