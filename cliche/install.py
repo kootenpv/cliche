@@ -1595,23 +1595,26 @@ packages.
 
 ## Minimal workflow
     cd my_project/                         # a dir with .py files
-    cliche install mytool              # creates __init__.py, _cliche.py,
-                                           # pyproject.toml, runs `pip install -e .`
+    cliche install mytool              # creates __init__.py, pyproject.toml,
+                                           # runs `pip install -e .`
     mytool <command> [args...]             # run any @cli function
-    cliche uninstall mytool            # remove entry point + _cliche.py
+    cliche uninstall mytool            # remove the entry point
     cliche ls                          # show every CLI installed via cliche
+    cliche migrate                     # re-align existing installs with the
+                                           # current cliche entry-point format
 
-DO NOT pre-create pyproject.toml, __init__.py, or _cliche.py yourself — `install`
-generates them. If pyproject.toml already exists, `install` edits it in place
-(adds [project.scripts] and dependencies). Just run `install` in any directory
-with .py files.
+DO NOT pre-create pyproject.toml or __init__.py yourself — `install` generates
+them. If pyproject.toml already exists, `install` edits it in place (adds
+[project.scripts] and dependencies). Just run `install` in any directory
+with .py files. Cliche writes NO `.py` files into your package; the entry
+point routes through `cliche.launcher:launch_<pkg>` (a cliche-owned trampoline
+that cleans sys.path before importing the user package).
 
 install flags: `-p PKG` (import name if ≠ dir), `-t` (isolated uv tool venv),
 `-f` (force over existing binary name).
 
-Always invoke the installed binary — e.g. `mytool add 2 3`. Do NOT run
-`python <pkg>/_cliche.py ...` or similar; that's an internal entry point, not
-a user-facing interface. If install fails, fix the install, don't work around it.
+Always invoke the installed binary — e.g. `mytool add 2 3`.
+If install fails, fix the install, don't work around it.
 
 ## Simplest recipe (use this unless you have a reason not to)
     cd <your-project-dir>                  # a directory with a real name
@@ -1880,9 +1883,10 @@ signature, default, and enum. Prefer it over `--help` for machine consumption.
   - Subdir layout: `my_project/mypkg/__init__.py`                  →  package = `mypkg`.
   - src layout:    `my_project/src/mypkg/__init__.py`              →  package = `mypkg`.
 
-The generated `_cliche.py` lives inside the package dir. Any `.py` file under that
-package is scanned (recursively). Skipped: `.git`, `__pycache__`, `venv`, `.venv`,
-`env`, `.env`, `node_modules`, any dir starting with `.`.
+Every `.py` file under the package is scanned (recursively). Skipped: `.git`,
+`__pycache__`, `venv`, `.venv`, `env`, `.env`, `node_modules`, any dir starting
+with `.`. Cliche writes no code into your package — the entry point routes
+through a cliche-owned launcher.
 
 ## Caching
 Cache lives at `$XDG_CACHE_HOME/cliche/<pkg>_<hash>.json` (default

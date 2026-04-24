@@ -110,13 +110,15 @@ decorators (`c = cli; @c def ...`) won't be detected. Stick to literal `@cli`
 or `@cli("group")`.
 
 **One install command.** `cliche install <binary>` reads the current
-dir, creates (or amends) `pyproject.toml`, generates `_cliche.py` (the entry
-point), and runs `pip install -e .` — or, with `--tool`, `uv tool install`
-into an isolated venv.
+dir, creates (or amends) `pyproject.toml` (the `[project.scripts]` entry
+routes through `cliche.launcher` so sys.path is cleaned before your
+package is imported), and runs `pip install -e .` — or, with `--tool`,
+`uv tool install` into an isolated venv. No `.py` files are written
+into your package.
 
 **One uninstall command.** `cliche uninstall <binary>` removes the
-binary, entry point, generated `_cliche.py`, the cache — and leaves your code
-alone.
+binary, the entry point, the cache, and the shell autocomplete hook —
+and leaves your code alone.
 
 **One list command.** `cliche ls` shows every CLI installed via
 `cliche` in the current Python env (plus `uv tool`-installed ones) —
@@ -443,11 +445,14 @@ cliche uninstall mytool                # straightforward case
 cliche uninstall bty --pkg sysdm       # disambiguate when two dists claim 'bty'
 ```
 
-Cleans up everything `cliche` created: the pip package, `_cliche.py`,
-generated `__init__.py` (only if it still matches the marker), runtime cache,
-`*.egg-info`, empty `[project.scripts]`, autocomplete hook in `~/.bashrc` /
-`~/.zshrc` / `~/.config/fish/config.fish`. User-written code is never
-touched.
+Cleans up everything `cliche` created: the pip package, the
+`[project.scripts]` entry, the generated `__init__.py` (only if it still
+matches the marker), runtime cache, `*.egg-info`, empty `[project.scripts]`,
+and the autocomplete hook in `~/.bashrc` / `~/.zshrc` /
+`~/.config/fish/config.fish`. Pre-launcher installs that still have a
+generated `_cliche.py` in the package dir get it removed too — but only
+when it still carries cliche's generation marker, so user-written code is
+never touched.
 
 You never end up with zombie binaries or "still registered but can't
 uninstall" errors: when two packages share a binary, `cliche` refuses to
@@ -641,7 +646,8 @@ Everything else should just work.
 cliche install <binary>    Install a CLI
 cliche uninstall <binary>  Uninstall (supports --pkg for disambiguation)
 cliche ls                  List every @cli CLI in this env
-cliche --llm-help               Print the full guide (for LLM consumption)
+cliche migrate             Apply registered migrations to existing installs
+cliche --llm-help          Print the full guide (for LLM consumption)
 ```
 
 ---
