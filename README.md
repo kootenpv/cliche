@@ -43,7 +43,7 @@ much. `cliche` takes a different route: **your function signature is your
 CLI**. Type annotations become argparse types. Defaults become flags.
 Docstrings become `--help` text. No re-declaration.
 
-- **Sub-80 ms startup** even in large packages — feels instant. AST-only
+- **Sub-50 ms startup** even in large packages — feels instant. AST-only
   scanning + per-file mtime cache, and lazy-import of the module for the
   invoked command only.
 - **No imports at scan time** — `@cli` is detected from source text, so
