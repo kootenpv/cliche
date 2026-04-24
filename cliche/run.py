@@ -1767,6 +1767,14 @@ def main():
                   file=sys.stderr)
             sys.exit(127)
 
+    # Accept underscore-style long flags (e.g. --exclude_exchanges) as aliases
+    # for the canonical kebab-case (--exclude-exchanges). Rewrite the flag
+    # portion only — values after `=` are left untouched.
+    for _i, _a in enumerate(sys.argv):
+        if _a.startswith('--') and '_' in _a:
+            _flag, _sep, _val = _a.partition('=')
+            sys.argv[_i] = _flag.replace('_', '-') + _sep + _val
+
     show_timing = '--timing' in sys.argv
     if show_timing:
         sys.argv.remove('--timing')
