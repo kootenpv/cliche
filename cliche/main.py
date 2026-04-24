@@ -181,6 +181,64 @@ def extract_python_enums(content: str, tree: ast.Module = None) -> dict[str, lis
     return enums
 
 
+def extract_pydantic_models(content: str, tree: ast.Module = None) -> set[str]:
+    """Extract names of classes textually declared as pydantic BaseModels.
+
+    Scans `class Foo(BaseModel)` / `class Foo(pydantic.BaseModel)` and — to
+    catch user base hierarchies like `class Settings(BaseModel)` followed by
+    `class AppSettings(Settings)` — also the transitive closure within the
+    file. Returns a set of class names.
+
+    Used so `build_parser_for_function(..., help_only=True)` can tell whether
+    an annotation refers to a pydantic model WITHOUT importing the user's
+    module. If yes, we still pay the import cost (unavoidable — need field
+    list). If no, we stay on the fast path. This preserves the expanded
+    --host/--port flags in --help output for functions that actually use
+    pydantic, while keeping non-pydantic commands fast.
+
+    Deliberately cheap and textual: misses models defined via
+    `create_model(...)` or BaseModel aliased with a non-obvious import.
+    Those fall through to the non-expanded view in --help — argparse
+    validation still works at invocation time.
+    """
+    if tree is None:
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            return set()
+
+    # Direct pydantic bases we recognise by name. `BaseSettings` is the
+    # pydantic-settings equivalent and is worth including.
+    PYD_BASE_NAMES = {"BaseModel", "BaseSettings"}
+
+    models: set[str] = set()
+    # Multiple passes let us resolve transitive subclassing
+    # (`class B(A)` where `A(BaseModel)` was declared earlier in the file).
+    # Two passes is enough for typical cases; iterate to a fixed point just
+    # in case.
+    class_bases: list[tuple[str, list[str]]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            base_names = []
+            for base in node.bases:
+                if isinstance(base, ast.Name):
+                    base_names.append(base.id)
+                elif isinstance(base, ast.Attribute):
+                    base_names.append(base.attr)
+            class_bases.append((node.name, base_names))
+
+    changed = True
+    while changed:
+        changed = False
+        for name, bases in class_bases:
+            if name in models:
+                continue
+            if any(b in PYD_BASE_NAMES or b in models for b in bases):
+                models.add(name)
+                changed = True
+    return models
+
+
 _LAZY_ARG_CLASSES = {"DateArg", "DateTimeArg", "DateUtcArg", "DateTimeUtcArg"}
 
 

@@ -4,7 +4,6 @@ Fast CLI loader that uses pre-parsed cache to avoid importing all modules.
 Only imports the specific module when a command is invoked.
 """
 import argparse
-import asyncio
 import importlib
 import inspect
 import json
@@ -83,10 +82,18 @@ class Colors:
         return text
 
 
-try:
-    from cliche import __version__
-except ImportError:
-    __version__ = "0.1.0"
+def _cliche_version() -> str:
+    """Read cliche's own package version lazily.
+
+    Done on-demand (not at import) so the startup path of every user CLI
+    doesn't pay for importlib.metadata (~20ms cold). Only --version, --cli,
+    and cli_info() need this string.
+    """
+    try:
+        from cliche import __version__ as v
+        return v
+    except ImportError:
+        return "0.1.0"
 
 
 def _resolve_pkg_version(pkg_name=None, install_dir=None):
@@ -167,7 +174,7 @@ def _collect_cli_info(cache_path=None, pkg_name=None, install_dir=None) -> list:
         ("Executable", name),
         ("Executable path", sys.argv[0]),
         ("Cache path", str(cache_display)),
-        ("Cliche version", __version__),
+        ("Cliche version", _cliche_version()),
         ("Installed by cliche", str(installed)),
     ]
     if pkg_name:
@@ -345,10 +352,17 @@ def load_cache():
 
 
 def build_index(data):
-    """Build lookup indices from cache data."""
+    """Build lookup indices from cache data.
+
+    Returns (commands, subcommands, enums, pydantic_models) — the fourth
+    element is a set of class names the AST scanner identified as pydantic
+    BaseModel subclasses. help_only mode uses this to decide whether an
+    annotation is worth importing the user module to resolve.
+    """
     commands = {}  # name -> func_info
     subcommands = {}  # group -> {name -> func_info}
     enums = data.get('enums', {})  # enum_name -> [values]
+    pydantic_models: set = set(data.get('pydantic_models', []))
 
     for file_path, entry in data['files'].items():
         for func in entry['functions']:
@@ -363,7 +377,7 @@ def build_index(data):
             else:
                 commands[name] = func
 
-    return commands, subcommands, enums
+    return commands, subcommands, enums, pydantic_models
 
 
 def get_docstring_first_line(func):
@@ -1031,6 +1045,28 @@ def _resolve_callable_type(annotation: str, module_name: str):
     return obj
 
 
+def _annotation_pydantic_name(annotation: str, pydantic_models) -> str | None:
+    """Return the class name referenced by ``annotation`` if it's in
+    ``pydantic_models`` — else None. Peels the same wrappers
+    ``_resolve_annotation_class`` would (Optional, `| None`, list[X], dotted
+    attribute access). Cheap string work, no imports.
+    """
+    if not annotation or not pydantic_models:
+        return None
+    s = annotation.strip()
+    if s.startswith('Optional[') and s.endswith(']'):
+        s = s[len('Optional['):-1].strip()
+    s = re.sub(r'\s*\|\s*None\b', '', s)
+    s = re.sub(r'\bNone\s*\|\s*', '', s).strip()
+    m = re.match(r'^(?:list|List|tuple|Tuple)\[([^,\]]+)', s)
+    if m:
+        s = m.group(1).strip()
+    cls_name = s.split('.')[-1]
+    if cls_name in pydantic_models:
+        return cls_name
+    return None
+
+
 def _resolve_annotation_class(annotation: str | None, module_name: str):
     """Best-effort: resolve a type-annotation string to the class object.
 
@@ -1106,8 +1142,28 @@ def _pydantic_fields(model_cls):
     return []
 
 
-def build_parser_for_function(func, enums=None, prog_name: str = "run.py"):
-    """Build argparse parser for a specific function."""
+def build_parser_for_function(func, enums=None, prog_name: str = "run.py", help_only: bool = False, pydantic_models=None):
+    """Build argparse parser for a specific function.
+
+    ``help_only=True`` skips user-module imports used only by argparse's
+    ``type=`` converter (``_resolve_callable_type``) — argparse's
+    ``action='help'`` exits before that code path runs. For pydantic
+    expansion we still need field metadata, so we consult ``pydantic_models``
+    (names detected by the AST scanner at cache-build time) and only import
+    the user module when an annotation actually references one. The
+    combination: fast help for common cases, correct expanded help for
+    pydantic-using functions — no user-module import when no pydantic model
+    is involved.
+    """
+    # ``pydantic_models=None`` means "caller didn't supply scanner data" —
+    # fall back to resolving every annotation (the pre-scanner behavior).
+    # An explicit (possibly empty) set means "use the scanner gate", so
+    # annotations not in the set skip `_resolve_annotation_class` and avoid
+    # importing the user module. Real CLI invocations from ``main()`` always
+    # pass the set; test callers that don't pass anything keep working.
+    _use_pyd_gate = pydantic_models is not None
+    if pydantic_models is None:
+        pydantic_models = set()
     if enums is None:
         enums = {}
 
@@ -1165,7 +1221,7 @@ def build_parser_for_function(func, enums=None, prog_name: str = "run.py"):
         #     def serve(port: Port): ...
         # argparse wraps any ValueError / ArgumentTypeError into a clean
         # "argument port: invalid Port value: '0'" error.
-        if param_type is str and annotation:
+        if param_type is str and annotation and not help_only:
             resolved = _resolve_callable_type(annotation, module_name)
             if resolved is not None:
                 param_type = resolved
@@ -1230,7 +1286,26 @@ def build_parser_for_function(func, enums=None, prog_name: str = "run.py"):
         # --<field> flags in a dedicated argument group and record the binding
         # so invoke_function can reconstruct the model instance. Skips enums
         # and primitive types — only triggers for real BaseModel subclasses.
-        annotation_cls = _resolve_annotation_class(annotation, module_name) if annotation else None
+        # With the scanner gate enabled, only import the user module when
+        # the annotation names a class the AST scanner flagged as pydantic.
+        # For every other annotation (str, int, Path, enums, custom type
+        # callables) there's no pydantic expansion to do, and
+        # _resolve_callable_type already handles the custom-type `type=`
+        # path with its own primitive-name guard. This cuts ~hundreds of ms
+        # off `cmd --help` AND `cmd` (missing-arg errors) for CLIs with
+        # heavy transitive dependencies. Without the gate (test callers
+        # that don't pass pydantic_models), keep the legacy always-resolve
+        # path so behavior is backward compatible.
+        if not annotation:
+            annotation_cls = None
+        elif _use_pyd_gate:
+            pyd_candidate = _annotation_pydantic_name(annotation, pydantic_models)
+            annotation_cls = (
+                _resolve_annotation_class(annotation, module_name)
+                if pyd_candidate else None
+            )
+        else:
+            annotation_cls = _resolve_annotation_class(annotation, module_name)
         if _is_pydantic_model(annotation_cls):
             group = parser.add_argument_group(
                 f'{annotation_cls.__name__} (bound to `{name}`)',
@@ -1544,6 +1619,7 @@ def invoke_function(func, parsed_args, enums=None, pydantic_binds=None):
 
     # Call the function (handle async functions)
     if inspect.iscoroutinefunction(fn):
+        import asyncio
         result = asyncio.run(fn(**kwargs))
     else:
         result = fn(**kwargs)
@@ -1645,7 +1721,7 @@ def main():
     # designed for `mytool --version | cut ...` and VERSION-file style use.
     if '--version' in sys.argv:
         pkg_ver = _resolve_pkg_version(PKG_NAME, INSTALL_DIR)
-        print(pkg_ver or __version__)
+        print(pkg_ver or _cliche_version())
         sys.exit(0)
 
     # Handle --cli early (before loading cache)
@@ -1776,7 +1852,7 @@ def main():
         print(f"timing cache_load{cached}: {(time.time() - t0)*1000:.1f}ms", file=sys.stderr)
 
     t1 = time.time()
-    commands, subcommands, enums = build_index(data)
+    commands, subcommands, enums, pydantic_models = build_index(data)
     if show_timing:
         print(f"timing build_index: {(time.time() - t1)*1000:.1f}ms", file=sys.stderr)
 
@@ -1915,7 +1991,8 @@ def main():
         sys.argv = sys.argv[1:]  # Shift argv for subparser
 
         t2 = time.time()
-        parser = build_parser_for_function(func, enums, prog_name=prog_name)
+        help_only = any(a in ('-h', '--help') for a in sys.argv[1:])
+        parser = build_parser_for_function(func, enums, prog_name=prog_name, help_only=help_only, pydantic_models=pydantic_models)
         if show_timing:
             print(f"timing build_parser: {(time.time() - t2)*1000:.1f}ms", file=sys.stderr)
 
@@ -1952,7 +2029,8 @@ def main():
             sys.argv = sys.argv[2:]  # Shift argv
 
             t2 = time.time()
-            parser = build_parser_for_function(func, enums, prog_name=prog_name)
+            help_only = any(a in ('-h', '--help') for a in sys.argv[1:])
+            parser = build_parser_for_function(func, enums, prog_name=prog_name, help_only=help_only, pydantic_models=pydantic_models)
             if show_timing:
                 print(f"timing build parser: {(time.time() - t2)*1000:.1f}ms", file=sys.stderr)
 

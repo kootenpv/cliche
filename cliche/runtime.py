@@ -199,7 +199,7 @@ def _ast_parse_file(args):
     try:
         from pathlib import Path
 
-        from cliche.main import extract_cli_functions, extract_python_enums
+        from cliche.main import extract_cli_functions, extract_pydantic_models, extract_python_enums
 
         content = open(full_path).read()
         functions, tree = extract_cli_functions(content, Path(full_path), Path(base_dir), return_tree=True)
@@ -217,7 +217,8 @@ def _ast_parse_file(args):
         # module) with no @cli functions, but still contribute to the global
         # enum cache consumed by @cli signatures in other files.
         local_enums = extract_python_enums(content, tree=tree)
-        return (rel_path, functions or [], local_enums)
+        local_pyd_models = extract_pydantic_models(content, tree=tree)
+        return (rel_path, functions or [], local_enums, local_pyd_models)
     except Exception:
         return None
 
@@ -330,6 +331,7 @@ def _scan_and_cache(pkg_dir: Path, cache_file: Path, package_name: str = "", sho
 
     # Phase 4: Full AST parse only for files with @cli that changed
     all_local_enums = {}
+    all_local_pyd_models: set[str] = set()
 
     if needs_full_ast:
         to_parse = []
@@ -346,19 +348,25 @@ def _scan_and_cache(pkg_dir: Path, cache_file: Path, package_name: str = "", sho
                     results = pool.map(_ast_parse_file, to_parse)
                 for result in results:
                     if result:
-                        rel_path, functions, local_enums = result
+                        rel_path, functions, local_enums, local_pyd_models = result
                         new_files[rel_path]["functions"] = functions
                         all_local_enums.update(local_enums)
+                        all_local_pyd_models.update(local_pyd_models)
             else:
                 for args in to_parse:
                     result = _ast_parse_file(args)
                     if result:
-                        rel_path, functions, local_enums = result
+                        rel_path, functions, local_enums, local_pyd_models = result
                         new_files[rel_path]["functions"] = functions
                         all_local_enums.update(local_enums)
+                        all_local_pyd_models.update(local_pyd_models)
 
     if show_timing:
-        print(f"ast_parse: {(time.time() - t0)*1000:.1f}ms ({len(all_local_enums)} local enums)", file=sys.stderr)
+        print(
+            f"ast_parse: {(time.time() - t0)*1000:.1f}ms "
+            f"({len(all_local_enums)} local enums, {len(all_local_pyd_models)} pydantic)",
+            file=sys.stderr,
+        )
 
     # Phase 5: Extract enums
     old_proto_enums = cache.get("proto_enums", {})
@@ -403,8 +411,20 @@ def _scan_and_cache(pkg_dir: Path, cache_file: Path, package_name: str = "", sho
 
     cache["enums"] = {**proto_enums_filtered, **py_enums_filtered}
 
+    # Pydantic model names — union of everything we've ever scanned. This is
+    # read in help_only mode (run.py) to decide whether an annotation is worth
+    # importing the user module for. False positives just cost an import on
+    # --help (same as today); false negatives skip pydantic field expansion
+    # in --help output — re-run touches all @cli files and repopulates.
+    old_pyd_models = set(cache.get("pydantic_models", []))
+    cache["pydantic_models"] = sorted(old_pyd_models | all_local_pyd_models)
+
     if show_timing:
-        print(f"enum_extract: {(time.time() - t0)*1000:.1f}ms ({len(cache['enums'])} enums)", file=sys.stderr)
+        print(
+            f"enum_extract: {(time.time() - t0)*1000:.1f}ms "
+            f"({len(cache['enums'])} enums, {len(cache['pydantic_models'])} pyd models)",
+            file=sys.stderr,
+        )
 
     # Update cache
     cache["files"] = new_files

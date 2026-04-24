@@ -117,6 +117,65 @@ class TestBuildParserWithPydantic:
         assert binds == [("cfg", SimpleModel, ["host", "port", "tls"])]
 
 
+class TestHelpOnlyPydanticExpansion:
+    """help_only=True must still expand pydantic fields when the AST scanner
+    named the model. Otherwise we regress help output for pydantic users."""
+
+    def _func(self):
+        return {
+            "name": "serve", "cli_name": "serve",
+            "module": __name__, "file_path": "",
+            "parameters": [{"name": "cfg", "type_annotation": "SimpleModel"}],
+            "docstring": "serve",
+        }
+
+    def test_expands_when_model_in_set(self):
+        parser = build_parser_for_function(
+            self._func(), help_only=True, pydantic_models={"SimpleModel"},
+        )
+        # Expanded flags parse exactly like the non-help path.
+        ns = parser.parse_args(["--host", "x", "--port", "9", "--tls"])
+        assert (ns.host, ns.port, ns.tls) == ("x", 9, True)
+        binds = getattr(parser, "_pydantic_binds", None)
+        assert binds == [("cfg", SimpleModel, ["host", "port", "tls"])]
+
+    def test_skipped_when_model_not_in_set(self):
+        # AST scanner didn't see this class → we must NOT import the user
+        # module to check. The param falls through to the non-expanded
+        # path (single --cfg flag rather than --host/--port/--tls).
+        parser = build_parser_for_function(
+            self._func(), help_only=True, pydantic_models=set(),
+        )
+        # No per-field flags were registered.
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--host", "x"])
+        binds = getattr(parser, "_pydantic_binds", None)
+        assert not binds
+
+    def test_strips_optional_wrapper(self):
+        # `Optional[SimpleModel]` and `SimpleModel | None` should both
+        # resolve to the bare class name when checking the set.
+        func = self._func()
+        func["parameters"][0]["type_annotation"] = "Optional[SimpleModel]"
+        parser = build_parser_for_function(
+            func, help_only=True, pydantic_models={"SimpleModel"},
+        )
+        ns = parser.parse_args(["--host", "x"])
+        assert ns.host == "x"
+
+    def test_extract_pydantic_models_ast(self):
+        """End-to-end: the AST extractor flags SimpleModel so the
+        `help_only` path above receives a populated set from the cache."""
+        from cliche.main import extract_pydantic_models
+        src = (
+            "from pydantic import BaseModel\n"
+            "class Inner(BaseModel):\n    x: int\n"
+            "class Outer(Inner):\n    y: int\n"
+            "class Unrelated:\n    pass\n"
+        )
+        assert extract_pydantic_models(src) == {"Inner", "Outer"}
+
+
 class TestInvokeFunctionWithPydantic:
     def test_model_reconstructed_at_invoke(self):
         """End-to-end: parse → invoke → function receives real BaseModel instance."""
