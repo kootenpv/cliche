@@ -10,6 +10,7 @@ Regressions caught via the ralph loop:
   (even empty, e.g. a mkdir typo) to subdir layout. Now requires at least
   one .py inside the subdir before promoting.
 """
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -55,7 +56,10 @@ class TestUpdatePyprojectTomlLayout:
             d.mkdir()
             _update_pyproject_toml(d, "mybin", "mypkg", is_subdir_package=is_subdir)
             content = (d / "pyproject.toml").read_text()
-            assert 'mybin = "mypkg._cliche:main"' in content
+            # Entry routes through the cliche-owned launcher, not directly at
+            # `{pkg}._cliche:main` — the launcher cleans sys.path before
+            # resolving the user package, closing the shadow-on-invoke window.
+            assert 'mybin = "cliche.launcher:launch_mypkg"' in content
 
     def test_existing_flat_mapping_healed_when_subdir_detected(self, tmp_path):
         """If pyproject already has flat `package-dir = {pkg = "."}` but we
@@ -176,9 +180,16 @@ class TestToolInstallProbe:
         # NOT sys.executable. This is the "use the tool venv's Python" fix.
         assert argv[0] == "/home/test/.local/bin/toolbin"
         assert sys.executable not in argv
-        # cwd must be a foreign dir (tempdir), not the workdir.
-        assert kw.get("cwd") == tempfile.gettempdir()
-        assert kw.get("cwd") != str(pkg)
+        # cwd must be a freshly-created subdir of the OS tempdir, not the
+        # workdir and not the bare tempdir itself. Using a fresh subdir
+        # closes a second class of false-positive: if a stray `{pkg}.py`
+        # happens to sit in /tmp (common during local dev and CI), a probe
+        # run from /tmp directly would see the shadow and fail a good
+        # install.
+        probe_cwd = kw.get("cwd")
+        assert probe_cwd != str(pkg)
+        assert probe_cwd != tempfile.gettempdir()
+        assert probe_cwd.startswith(tempfile.gettempdir())
 
     def test_pip_mode_probe_uses_sys_executable_not_binary_shim(self, tmp_path):
         pkg = self._make_pkg(tmp_path, name="pippkg")
@@ -202,6 +213,144 @@ class TestToolInstallProbe:
             self._install_with_mocks(pkg, "gonebin", tool=True, binary_on_path=False)
 
 
+# ---------------------------------------------------------------------------
+# Session-scoped batching for the real-install tests.
+#
+# Both layout-variant test classes below need a full `cliche install` +
+# `binary ping` + `cliche uninstall` cycle. Done per-class (the old shape),
+# each install costs ~450 ms and they run serially — dominating wall time
+# for this file. One shared session fixture runs both installs + both
+# probes concurrently, cutting wall time roughly in half. Same pattern as
+# `cli_results` in conftest.py / test_e2e.py.
+#
+# Tests then index into the pre-computed dict. Keeping two test classes
+# preserves `pytest -k` filtering by behaviour.
+# ---------------------------------------------------------------------------
+
+_PING_CLI_SRC = (
+    "from cliche import cli\n"
+    "\n"
+    "@cli\n"
+    "def ping():\n"
+    "    return {'pong': True}\n"
+)
+
+_LAYOUT_SPECS = {
+    "subdir": {
+        "binary": "nc_subdir_bin",
+        "pkg": "subpkg",
+        "layout": "subdir",  # workdir/<pkg>/{__init__,cli}.py
+    },
+    "renamed_flat": {
+        "binary": "nc_renamed_bin",
+        "pkg": "nc_renamed_pkg",
+        "layout": "renamed_flat",  # flat, workdir basename ≠ pkg name
+    },
+}
+
+
+@pytest.fixture(scope="session")
+def layout_installs(tmp_path_factory):
+    """Install each layout fixture package and pre-run its foreign-cwd probe.
+
+    The key speedup: `cliche install --no-pip` is run per-workdir (cheap —
+    just file generation and layout detection), then ONE `pip install -e .`
+    invocation installs both workdirs in a single call. That amortises pip's
+    startup (the dominant cost per install) across the two packages, the
+    same way test_mypy batches every probe into one mypy process and
+    test_e2e batches every argv into one session fixture.
+
+    Returns `{variant: {spec, work, install, probe}}`. Teardown uninstalls
+    in parallel.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _make_workdir(name: str, spec: dict):
+        if spec["layout"] == "subdir":
+            work = tmp_path_factory.mktemp(f"inst_{name}")
+            inner = work / spec["pkg"]
+            inner.mkdir()
+            (inner / "__init__.py").write_text('"""Subdir package."""\n')
+            (inner / "cli.py").write_text(_PING_CLI_SRC)
+        else:  # renamed_flat
+            work = tmp_path_factory.mktemp(f"inst_{name}") / "dirname_mismatch"
+            work.mkdir()
+            (work / "__init__.py").write_text('"""Renamed flat package."""\n')
+            (work / "cli.py").write_text(_PING_CLI_SRC)
+        return work
+
+    # Phase 1: generate pyproject/__init__ for every variant (no pip yet).
+    workdirs: dict = {}
+    file_gen_results: dict = {}
+    for name, spec in _LAYOUT_SPECS.items():
+        work = _make_workdir(name, spec)
+        workdirs[name] = work
+        file_gen_results[name] = subprocess.run(
+            [_sys.executable, "-m", "cliche.install", "install",
+             spec["binary"], "-d", str(work), "-p", spec["pkg"],
+             "--no-autocomplete", "--force", "--no-pip"],
+            capture_output=True, text=True,
+        )
+        if file_gen_results[name].returncode != 0:
+            pytest.fail(
+                f"{name} pyproject generation failed "
+                f"({file_gen_results[name].returncode}):\n"
+                f"stdout: {file_gen_results[name].stdout}\n"
+                f"stderr: {file_gen_results[name].stderr}"
+            )
+
+    # Phase 2: ONE pip install -e workA -e workB. This is the win vs. two
+    # sequential `cliche install` calls — pip boots once, resolves
+    # dependencies once, and installs both packages together.
+    uv_path = shutil.which("uv")
+    if uv_path:
+        pip_cmd = [uv_path, "pip", "install", "--python", _sys.executable]
+    else:
+        pip_cmd = [_sys.executable, "-m", "pip", "install"]
+    for work in workdirs.values():
+        pip_cmd += ["-e", str(work)]
+    pip_result = subprocess.run(pip_cmd, capture_output=True, text=True)
+    if pip_result.returncode != 0:
+        pytest.fail(
+            f"batched editable install failed ({pip_result.returncode}):\n"
+            f"stdout: {pip_result.stdout}\nstderr: {pip_result.stderr}"
+        )
+
+    # Phase 3: pre-run every probe concurrently — these are quick subprocesses
+    # with no shared resource contention, so a thread pool is pure win.
+    def _probe(name: str):
+        spec = _LAYOUT_SPECS[name]
+        return name, subprocess.run(
+            [spec["binary"], "ping"],
+            capture_output=True, text=True, cwd=tempfile.gettempdir(),
+        )
+
+    with ThreadPoolExecutor(max_workers=len(_LAYOUT_SPECS)) as pool:
+        probes = dict(pool.map(_probe, _LAYOUT_SPECS.keys()))
+
+    results = {
+        name: {
+            "spec": _LAYOUT_SPECS[name],
+            "work": workdirs[name],
+            "install": file_gen_results[name],  # kept for parity; non-fatal info only
+            "probe": probes[name],
+        }
+        for name in _LAYOUT_SPECS
+    }
+
+    try:
+        yield results
+    finally:
+        def _uninstall(name: str):
+            subprocess.run(
+                [_sys.executable, "-m", "cliche.install", "uninstall",
+                 _LAYOUT_SPECS[name]["binary"]],
+                capture_output=True, text=True,
+            )
+        with ThreadPoolExecutor(max_workers=len(_LAYOUT_SPECS)) as pool:
+            list(pool.map(_uninstall, _LAYOUT_SPECS.keys()))
+
+
 class TestSubdirLayoutForeignCwd:
     """Real install of a subdir-layout package, then invocation from a foreign
     cwd. The commit 9b82daf bug only manifested when the binary was run from
@@ -209,71 +358,27 @@ class TestSubdirLayoutForeignCwd:
     otherwise. This test intentionally runs the binary from tempdir.
     """
 
-    BINARY_NAME = "nc_subdir_bin"  # unique so it can't collide
-
-    @pytest.fixture(scope="class")
-    def subdir_binary(self, tmp_path_factory):
-        """Build a subdir-layout workdir, install, yield (binary, workdir),
-        uninstall at teardown. One-shot — too expensive per test."""
-        work = tmp_path_factory.mktemp("nc_subdir")
-        pkg = work / "subpkg"
-        pkg.mkdir()
-        (pkg / "__init__.py").write_text('"""Subdir package."""\n')
-        (pkg / "cli.py").write_text(
-            "from cliche import cli\n"
-            "\n"
-            "@cli\n"
-            "def ping():\n"
-            "    return {'pong': True}\n"
-        )
-
-        install_cmd = [
-            _sys.executable, "-m", "cliche.install", "install",
-            self.BINARY_NAME, "-d", str(work),
-            "-p", "subpkg",  # force subdir-layout by naming a subdir that exists
-            "--no-autocomplete", "--force",
-        ]
-        result = subprocess.run(install_cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            pytest.fail(
-                f"subdir install failed ({result.returncode}):\n"
-                f"stdout: {result.stdout}\nstderr: {result.stderr}"
-            )
-
-        try:
-            yield self.BINARY_NAME, work
-        finally:
-            subprocess.run(
-                [_sys.executable, "-m", "cliche.install", "uninstall", self.BINARY_NAME],
-                capture_output=True, text=True,
-            )
-
-    def test_binary_works_from_foreign_cwd(self, subdir_binary):
+    def test_binary_works_from_foreign_cwd(self, layout_installs):
         """Run the binary from tempfile.gettempdir() — a different filesystem
         location than the workdir. The subdir-layout pyproject template must
         NOT hard-code a flat-layout `package-dir = {"subpkg" = "."}` mapping
         (which only worked when Python's cwd was the workdir)."""
-        binary, work = subdir_binary
+        r = layout_installs["subdir"]
         foreign_cwd = tempfile.gettempdir()
-        assert foreign_cwd != str(work), "test assumption: foreign_cwd must differ from workdir"
-
-        result = subprocess.run(
-            [binary, "ping"],
-            capture_output=True, text=True, cwd=foreign_cwd,
+        assert foreign_cwd != str(r["work"]), "test assumption: foreign_cwd must differ from workdir"
+        probe = r["probe"]
+        assert probe.returncode == 0, (
+            f"binary failed from foreign cwd (rc={probe.returncode})\n"
+            f"stdout: {probe.stdout}\nstderr: {probe.stderr}"
         )
-        assert result.returncode == 0, (
-            f"binary failed from foreign cwd (rc={result.returncode})\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-        assert '"pong"' in result.stdout
-        assert "true" in result.stdout.lower()
+        assert '"pong"' in probe.stdout
+        assert "true" in probe.stdout.lower()
 
-    def test_pyproject_omits_flat_layout_package_dir(self, subdir_binary):
+    def test_pyproject_omits_flat_layout_package_dir(self, layout_installs):
         """Paranoid check: the generated pyproject for subdir layout must not
         contain the flat-layout `package-dir` mapping. Covers the exact
         regression path — a future refactor could mistakenly reintroduce it."""
-        _, work = subdir_binary
-        content = (work / "pyproject.toml").read_text()
+        content = (layout_installs["subdir"]["work"] / "pyproject.toml").read_text()
         assert 'package-dir' not in content
         assert 'packages = ["subpkg"]' in content
 
@@ -282,78 +387,30 @@ class TestFlatRenamedLayoutForeignCwd:
     """Flat layout where the directory name DIFFERS from the package name.
     This is the `solidsnake/` dir installed as `tovermunt` pattern: pyproject
     carries `package-dir = {"tovermunt" = "."}` so pip maps tovermunt to the
-    workdir. The generated _cliche.py must still bootstrap cleanly when
-    invoked directly (`python _cliche.py`), since a plain sys.path insert
-    can't help — it would add the workdir's parent, and there's no
-    `parent/tovermunt/` there to import.
+    workdir. The binary must still resolve the package under its declared
+    name when invoked from a foreign cwd — the launcher cleans sys.path and
+    then `cliche.runtime.run_package_cli` imports the package via the
+    editable-install wiring.
     """
 
-    BINARY_NAME = "nc_renamed_bin"
-
-    @pytest.fixture(scope="class")
-    def renamed_binary(self, tmp_path_factory):
-        work = tmp_path_factory.mktemp("nc_renamed") / "dirname_mismatch"
-        work.mkdir()
-        (work / "__init__.py").write_text('"""Renamed flat package."""\n')
-        (work / "cli.py").write_text(
-            "from cliche import cli\n"
-            "\n"
-            "@cli\n"
-            "def ping():\n"
-            "    return {'pong': True}\n"
+    def test_binary_works_from_foreign_cwd(self, layout_installs):
+        probe = layout_installs["renamed_flat"]["probe"]
+        assert probe.returncode == 0, (
+            f"rc={probe.returncode} stdout={probe.stdout!r} stderr={probe.stderr!r}"
         )
+        assert '"pong"' in probe.stdout
 
-        install_cmd = [
-            _sys.executable, "-m", "cliche.install", "install",
-            self.BINARY_NAME, "-d", str(work),
-            "-p", "nc_renamed_pkg",
-            "--no-autocomplete", "--force",
-        ]
-        result = subprocess.run(install_cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            pytest.fail(
-                f"renamed install failed ({result.returncode}):\n"
-                f"stdout: {result.stdout}\nstderr: {result.stderr}"
-            )
+    def test_no_cliche_py_written_to_user_package(self, layout_installs):
+        """Cliche does not leave a `_cliche.py` trampoline inside the user
+        package any more — the shim now routes through `cliche.launcher`
+        and calls `run_package_cli` directly. The user's install dir
+        should contain their own code plus `__init__.py` / `pyproject.toml`
+        and nothing else cliche-authored."""
+        work = layout_installs["renamed_flat"]["work"]
+        assert not (work / "_cliche.py").exists()
 
-        try:
-            yield self.BINARY_NAME, work
-        finally:
-            subprocess.run(
-                [_sys.executable, "-m", "cliche.install", "uninstall", self.BINARY_NAME],
-                capture_output=True, text=True,
-            )
-
-    def test_binary_works_from_foreign_cwd(self, renamed_binary):
-        binary, work = renamed_binary
-        result = subprocess.run(
-            [binary, "ping"],
-            capture_output=True, text=True, cwd=tempfile.gettempdir(),
-        )
-        assert result.returncode == 0, (
-            f"rc={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}"
-        )
-        assert '"pong"' in result.stdout
-
-    def test_direct_cliche_py_execution_from_foreign_cwd(self, renamed_binary):
-        """`python _cliche.py ping` from outside the workdir must resolve
-        the package under its declared name even though it's not a subdir
-        of anything on the default sys.path. The generated bootstrap does
-        this via `importlib.util.spec_from_file_location`."""
-        _, work = renamed_binary
-        cliche_py = work / "_cliche.py"
-        assert cliche_py.exists()
-        result = subprocess.run(
-            [_sys.executable, str(cliche_py), "ping"],
-            capture_output=True, text=True, cwd=tempfile.gettempdir(),
-        )
-        assert result.returncode == 0, (
-            f"rc={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}"
-        )
-        assert '"pong"' in result.stdout
-
-    def test_pyproject_has_package_dir_mapping(self, renamed_binary):
-        _, work = renamed_binary
+    def test_pyproject_has_package_dir_mapping(self, layout_installs):
+        work = layout_installs["renamed_flat"]["work"]
         content = (work / "pyproject.toml").read_text()
         # Flat layout + rename: mapping must be present so pip knows where pkg lives.
         assert '"nc_renamed_pkg" = "."' in content

@@ -463,22 +463,43 @@ def run_package_cli(package_name: str, _entry_ts: float = None):
         elif _entry_ts is not None:
             print(f"import_overhead: {(t0 - _entry_ts)*1000:.1f}ms", file=sys.stderr)
 
-    # Discover package location
+    # Discover package location WITHOUT executing its `__init__.py`. We only
+    # need `pkg_dir` here — the directory to scan for `@cli` functions. Actual
+    # module import is deferred to `invoke_function` (for dispatch) or to
+    # `build_parser_for_function` (only when an annotation needs resolution,
+    # e.g. pydantic expansion). `find_spec` walks sys.path and returns the
+    # loader metadata without running user code, so packages with heavy
+    # top-level imports (ML libs, config readers, etc.) don't tax --help.
+    import importlib.util
     try:
-        pkg = importlib.import_module(package_name)
-    except ImportError as e:
-        print(f"Error: Could not import package '{package_name}': {e}", file=sys.stderr)
+        spec = importlib.util.find_spec(package_name)
+    except (ImportError, ValueError) as e:
+        print(f"Error: Could not locate package '{package_name}': {e}", file=sys.stderr)
+        sys.exit(1)
+    if spec is None:
+        print(f"Error: Could not locate package '{package_name}'", file=sys.stderr)
         sys.exit(1)
 
-    pkg_dir = Path(pkg.__file__).parent
+    # Regular packages expose `origin` pointing at __init__.py. Namespace
+    # packages have origin=None but list directories in
+    # submodule_search_locations — pick the first one.
+    if spec.origin and spec.origin != "namespace":
+        pkg_dir = Path(spec.origin).parent
+    elif spec.submodule_search_locations:
+        pkg_dir = Path(list(spec.submodule_search_locations)[0])
+    else:
+        print(f"Error: package '{package_name}' has no locatable source directory", file=sys.stderr)
+        sys.exit(1)
 
-    # Add package parent to sys.path so `import <pkg>` resolves
-    pkg_parent = pkg_dir.parent
-    if str(pkg_parent) not in sys.path:
-        sys.path.insert(0, str(pkg_parent))
-    # Also add pkg_dir itself so flat-layout packages can import sibling modules
+    # Add pkg_dir itself so flat-layout packages can import sibling modules
     # by their top-level name (e.g. `from build_index import ...` where build_index.py
     # lives next to cli.py inside the package directory).
+    #
+    # We do NOT insert pkg_dir.parent: the `importlib.import_module(package_name)`
+    # above already succeeded, so no further sys.path manipulation is needed to
+    # resolve the package itself. Inserting the parent dir used to leak a shared
+    # location (workdir parent — often /tmp or ~) onto sys.path, which would let
+    # unrelated `{pkg}.py` files anywhere up the tree shadow future imports.
     if str(pkg_dir) not in sys.path:
         sys.path.insert(0, str(pkg_dir))
 
@@ -511,14 +532,12 @@ def run_package_cli(package_name: str, _entry_ts: float = None):
     if show_timing:
         print(f"index_build: {(time.time() - t0)*1000:.1f}ms", file=sys.stderr)
 
-    # Lazy import - only import the module for the command being run
-    if len(sys.argv) > 1 and "--help" not in sys.argv and "-h" not in sys.argv:
-        one = sys.argv[1].replace("-", "_")
-        two = sys.argv[2].replace("-", "_") if len(sys.argv) > 2 else ""
-        key = subcommands.get(one, {}).get(two) or commands.get(one)
-        if key and key in func_to_mod:
-            __import__(func_to_mod[key])
-
+    # Deliberately NO eager user-module import here. `invoke_function`
+    # imports on successful dispatch; `build_parser_for_function` imports
+    # only when an annotation actually needs it (pydantic field expansion
+    # / custom `type=` callable). Importing eagerly would pay a heavy
+    # transitive-dep cost on every invocation — including ones where
+    # argparse immediately errors out on a missing required arg.
     if show_timing:
         print(f"total_before_run: {(time.time() - t0)*1000:.1f}ms", file=sys.stderr)
 
