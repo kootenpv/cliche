@@ -414,3 +414,134 @@ class TestFlatRenamedLayoutForeignCwd:
         content = (work / "pyproject.toml").read_text()
         # Flat layout + rename: mapping must be present so pip knows where pkg lives.
         assert '"nc_renamed_pkg" = "."' in content
+
+
+_SCD_SINGLE_BINARY = "scd_solo"
+_SCD_MULTI_BINARY = "scd_multi"
+
+_SCD_SINGLE_SRC = (
+    "from cliche import cli\n"
+    "\n"
+    "@cli\n"
+    f"def {_SCD_SINGLE_BINARY}(name: str, times: int = 1):\n"
+    "    for _ in range(times):\n"
+    "        print(f'hi {name}')\n"
+)
+
+_SCD_MULTI_SRC = (
+    "from cliche import cli\n"
+    "\n"
+    "@cli\n"
+    "def solo(name: str):\n"
+    "    print(f'hi {name}')\n"
+    "\n"
+    "@cli\n"
+    "def other(x: int):\n"
+    "    print(x * 2)\n"
+)
+
+
+@pytest.fixture(scope="session")
+def dispatch_installs(tmp_path_factory):
+    """Session-scoped batched install for TestSingleCommandDispatch.
+
+    Mirrors `layout_installs`'s two-phase pattern: file-gen each variant via
+    `cliche.install --no-pip`, then ONE editable pip install for both. Saves
+    ~500 ms per test vs. each test running its own install + uninstall.
+    """
+    def _file_gen(name, src, binary):
+        work = tmp_path_factory.mktemp(f"scd_{name}")
+        (work / "__init__.py").write_text('"""scd test pkg."""\n')
+        (work / "cli.py").write_text(src)
+        result = subprocess.run(
+            [_sys.executable, "-m", "cliche.install", "install",
+             binary, "-d", str(work), "--no-autocomplete", "--force", "--no-pip"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            pytest.fail(
+                f"{name} file-gen failed ({result.returncode}):\n"
+                f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            )
+        return work
+
+    single_work = _file_gen("single", _SCD_SINGLE_SRC, _SCD_SINGLE_BINARY)
+    multi_work = _file_gen("multi", _SCD_MULTI_SRC, _SCD_MULTI_BINARY)
+
+    uv_path = shutil.which("uv")
+    if uv_path:
+        pip_cmd = [uv_path, "pip", "install", "--python", _sys.executable]
+    else:
+        pip_cmd = [_sys.executable, "-m", "pip", "install"]
+    pip_cmd += ["-e", str(single_work), "-e", str(multi_work)]
+    pip_result = subprocess.run(pip_cmd, capture_output=True, text=True)
+    if pip_result.returncode != 0:
+        pytest.fail(
+            f"batched dispatch install failed ({pip_result.returncode}):\n"
+            f"stdout: {pip_result.stdout}\nstderr: {pip_result.stderr}"
+        )
+
+    try:
+        yield {"single": _SCD_SINGLE_BINARY, "multi": _SCD_MULTI_BINARY}
+    finally:
+        for binary in (_SCD_SINGLE_BINARY, _SCD_MULTI_BINARY):
+            subprocess.run(
+                [_sys.executable, "-m", "cliche.install", "uninstall", binary],
+                capture_output=True, text=True,
+            )
+
+
+class TestSingleCommandDispatch:
+    """Regression: when a CLI has exactly ONE `@cli` function and that
+    function's CLI-normalized name equals the binary name (e.g. binary
+    `csv_stats` with function `csv_stats`), invoking `<binary> <args>` must
+    dispatch directly to the function — without requiring the user to repeat
+    the binary name as a subcommand.
+
+    Found via ralph (freeform_csv_stats task, 2026-04-25): qwen wrote a
+    natural single-function CLI and got `Unknown command: <first arg>` when
+    the first positional was being parsed as a subcommand selector instead of
+    as the function's first argument. Patched in run.py:main() to detect the
+    single-command case before falling through to the unknown-command branch.
+
+    Multi-command CLIs are deliberately NOT affected — this dispatch only
+    triggers when there is exactly one ungrouped @cli function and its name
+    matches the binary.
+    """
+
+    def test_single_command_invocation_without_subcommand(self, dispatch_installs):
+        """`<binary> alice` must dispatch to the @cli function — not error
+        with 'Unknown command: alice' as it did before the patch."""
+        binary = dispatch_installs["single"]
+        # Direct invocation: positional first, no subcommand.
+        r = subprocess.run([binary, "alice"], capture_output=True, text=True)
+        assert r.returncode == 0, (
+            f"direct invocation failed:\nstdout: {r.stdout}\nstderr: {r.stderr}"
+        )
+        assert r.stdout.strip() == "hi alice"
+
+        # With a flag.
+        r = subprocess.run([binary, "bob", "--times", "2"],
+                           capture_output=True, text=True)
+        assert r.returncode == 0, (
+            f"flagged invocation failed:\nstdout: {r.stdout}\nstderr: {r.stderr}"
+        )
+        assert r.stdout.strip().splitlines() == ["hi bob", "hi bob"]
+
+    def test_multi_command_still_requires_explicit_subcommand(self, dispatch_installs):
+        """Sanity guard: the patch must NOT trigger for multi-command CLIs.
+        With two @cli functions, the user still has to name which one to run."""
+        binary = dispatch_installs["multi"]
+        # Calling without a subcommand should error (no implicit dispatch).
+        r = subprocess.run([binary, "alice"], capture_output=True, text=True)
+        assert r.returncode != 0, (
+            f"multi-cmd CLI must not implicit-dispatch on 'alice' — "
+            f"there are two commands. stdout={r.stdout!r}"
+        )
+        # Explicit form still works.
+        r = subprocess.run([binary, "solo", "alice"],
+                           capture_output=True, text=True)
+        assert r.returncode == 0, (
+            f"explicit subcommand failed:\nstdout: {r.stdout}\nstderr: {r.stderr}"
+        )
+        assert r.stdout.strip() == "hi alice"

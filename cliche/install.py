@@ -1657,6 +1657,15 @@ then reinstall with `--package-name` set correctly.
 After `install`, the binary `mytool` is on PATH. Editing source files does NOT
 require reinstall — the cache auto-updates on each invocation via mtime checks.
 
+IMPORTANT — single-command CLI: if your project has exactly ONE `@cli` function
+and its name equals the binary name (e.g. binary `csv_stats` with function
+`csv_stats`), invoke it WITHOUT repeating the name:
+
+    csv_stats <arg1> <arg2>
+
+Do NOT write `csv_stats csv_stats <arg1> <arg2>` — cliche auto-detects the
+single-command case and dispatches directly.
+
 ## The @cli decorator
     from cliche import cli
 

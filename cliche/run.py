@@ -2057,6 +2057,39 @@ def main():
             print(f"Unknown command: {cmd} {subcmd}", file=sys.stderr)
             sys.exit(1)
 
+    # When the binary name equals the only ungrouped command name (e.g.
+    # `csv_stats` binary with a `csv_stats` function), the user will run
+    # `csv_stats <pos1> <pos2>` — but `sys.argv[1]` is <pos1>, not the
+    # command name.  Detect that single-command case and dispatch directly.
+    if len(commands) == 1 and not subcommands:
+        single_name, single_func = next(iter(commands.items()))
+        if single_name == prog_name.replace('_', '-'):
+            func = single_func
+            # sys.argv[1:] is the correct arg list for the function.
+            # Pass it directly to parse_args() instead of shifting sys.argv
+            # (parse_args reads sys.argv[1:] by default, which would eat
+            # the first positional arg if we shifted).
+            func_argv = sys.argv[1:]
+
+            t2 = time.time()
+            help_only = any(a in ('-h', '--help') for a in func_argv)
+            parser = build_parser_for_function(func, enums, prog_name=prog_name, help_only=help_only, pydantic_models=pydantic_models)
+            if show_timing:
+                print(f"timing build_parser: {(time.time() - t2)*1000:.1f}ms", file=sys.stderr)
+
+            parsed_args = parser.parse_args(func_argv)
+
+            if show_timing:
+                print(f"timing before import: {(time.time() - t0)*1000:.1f}ms", file=sys.stderr)
+
+            t3 = time.time()
+            invoke_function(func, parsed_args, enums,
+                            pydantic_binds=getattr(parser, '_pydantic_binds', None))
+            if show_timing:
+                print(f"timing import+invoke: {(time.time() - t3)*1000:.1f}ms", file=sys.stderr)
+                print(f"timing total: {(time.time() - t0)*1000:.1f}ms", file=sys.stderr)
+            return
+
     print(f"Unknown command: {cmd}", file=sys.stderr)
     sys.exit(1)
 
