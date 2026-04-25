@@ -5,7 +5,6 @@ Only imports the specific module when a command is invoked.
 """
 import argparse
 import importlib
-import inspect
 import json
 import os
 import re
@@ -220,11 +219,19 @@ def _docstring_style_summary(cache_path) -> str | None:
 
 def cli_info(cache_path=None, pkg_name=None, install_dir=None) -> None:
     """Outputs CLI and Python version info and exits."""
+    print("CLI INFO:")
     for label, value in _collect_cli_info(cache_path, pkg_name, install_dir):
-        print(f"{label + ':':<21}", Colors.blue(value))
+        print(f"  {label + ':':<21}", Colors.blue(value))
     summary = _docstring_style_summary(cache_path)
     if summary:
-        print(f"{'Docstring styles:':<21}", Colors.blue(summary))
+        print()
+        print("DOCSTRING STYLES:")
+        total = 0
+        for part in summary.split(', '):
+            style, count = part.split('=')
+            print(f"  {style + ':':<21}", Colors.blue(count))
+            total += int(count)
+        print(f"  {'total:':<21}", Colors.blue(str(total)))
 
 
 def colorize_help(message: str, stream=None) -> str:
@@ -716,6 +723,8 @@ def print_llm_command_help(func: dict, prog_name: str, cmd: str, group: str = No
     print("--timing: timing info | --skip-gen: skip cache regen | --version: package version | --cli: version info | --llm-help: this view")
 
 
+
+
 def print_help(commands, subcommands, prog_name: str = "run.py"):
     """Print help similar to 1one --help."""
     print(f"{Colors.blue(f'usage: {prog_name} [-h] [--llm-help] [--pdb] [--pip] [--uv] [--pyspy N] [--timing] COMMAND ...')}\n")
@@ -734,7 +743,7 @@ def print_help(commands, subcommands, prog_name: str = "run.py"):
         padded_group = f"    {group:16}"
         print(f"{Colors.blue(padded_group)}({', '.join(funcs)})")
 
-    print("\nOPTIONS:")
+    print("\nCLICHE OPTIONS:")
     print(f"  {Colors.blue('-h')}, {Colors.blue('--help')}    Show this help message")
     print(f"  {Colors.blue('--version')}     Print the package version and exit")
     print(f"  {Colors.blue('--cli')}         Show CLI and Python version info (including package version)")
@@ -1129,6 +1138,7 @@ def _resolve_annotation_class(annotation: str | None, module_name: str):
 
 def _is_pydantic_model(cls) -> bool:
     """True if cls subclasses pydantic.BaseModel (v1 or v2)."""
+    import inspect
     if cls is None or not inspect.isclass(cls):
         return False
     try:
@@ -1208,7 +1218,7 @@ def build_parser_for_function(func, enums=None, prog_name: str = "run.py", help_
     )
 
     # Add global CLI flags
-    global_group = parser.add_argument_group('GLOBAL OPTIONS')
+    global_group = parser.add_argument_group('CLICHE OPTIONS')
     global_group.add_argument('-h', '--help', action='help', help='Show this help message')
     global_group.add_argument('--cli', action='store_true', help='Show CLI and Python version info')
     global_group.add_argument('--pdb', action='store_true', help='Drop into debugger on error')
@@ -1557,6 +1567,7 @@ def convert_enum_args(func, kwargs, enums):
 
 def invoke_function(func, parsed_args, enums=None, pydantic_binds=None):
     """Import module and invoke the function."""
+    import inspect  # lazy: only the invoke path needs this (~7ms import)
     module_name = func['module']
     func_name = func['name']
 
