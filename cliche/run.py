@@ -192,10 +192,39 @@ def _collect_cli_info(cache_path=None, pkg_name=None, install_dir=None) -> list:
     return info
 
 
+def _docstring_style_summary(cache_path) -> str | None:
+    """Return a `sphinx=N, google=N, ...` summary across all cached commands,
+    or None if the cache isn't available."""
+    try:
+        from cliche.docstring import detect_style
+    except ImportError:
+        from docstring import detect_style
+    try:
+        if PRELOADED_CACHE is not None:
+            data = PRELOADED_CACHE
+        else:
+            with open(cache_path or CACHE_PATH) as f:
+                data = json.load(f)
+    except (FileNotFoundError, IOError, json.JSONDecodeError):
+        return None
+    counts: dict[str, int] = {}
+    for entry in data.get('files', {}).values():
+        for func in entry.get('functions', ()):
+            style = detect_style(func.get('docstring') or '')
+            counts[style] = counts.get(style, 0) + 1
+    if not counts:
+        return None
+    order = ('sphinx', 'google', 'numpy', 'freeform', 'missing')
+    return ', '.join(f'{s}={counts[s]}' for s in order if counts.get(s))
+
+
 def cli_info(cache_path=None, pkg_name=None, install_dir=None) -> None:
     """Outputs CLI and Python version info and exits."""
     for label, value in _collect_cli_info(cache_path, pkg_name, install_dir):
         print(f"{label + ':':<21}", Colors.blue(value))
+    summary = _docstring_style_summary(cache_path)
+    if summary:
+        print(f"{'Docstring styles:':<21}", Colors.blue(summary))
 
 
 def colorize_help(message: str, stream=None) -> str:
