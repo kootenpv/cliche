@@ -2266,47 +2266,6 @@ class Migration:
     apply: "Callable[[dict], tuple[bool, str]]"                   # mutator
 
 
-def _orphan_legacy_shim_path(install: dict) -> Path | None:
-    """Return the path to an orphan marker-bearing `_cliche.py` in this
-    install's source tree, or None if there's nothing to clean.
-
-    The `launcher-entry` migration re-runs `cliche install --force`, which
-    deletes the shim as a side effect. But when pyproject was already
-    updated out-of-band (so `launcher-entry.needs()` returns False),
-    the orphan file stays on disk and no migration fires — this probe
-    surfaces it so `cleanup-legacy-shim` can remove it.
-    """
-    src = install.get("source_dir")
-    if not src:
-        return None
-    root = Path(src)
-    pkg = install.get("pkg", "")
-    candidates = [root / "_cliche.py"]
-    if pkg:
-        candidates.append(root / pkg / "_cliche.py")
-    for path in candidates:
-        if not path.exists():
-            continue
-        try:
-            head = path.read_text().splitlines()[:3]
-        except OSError:
-            continue
-        if any(_LEGACY_CLICHE_MODULE_MARKER in line for line in head):
-            return path
-    return None
-
-
-def _apply_cleanup_legacy_shim(install: dict) -> tuple[bool, str]:
-    path = _orphan_legacy_shim_path(install)
-    if path is None:
-        return True, "nothing to clean"
-    try:
-        path.unlink()
-    except OSError as e:
-        return False, f"could not remove {path}: {e}"
-    return True, f"removed {path}"
-
-
 def _apply_launcher_entry(install: dict) -> tuple[bool, str]:
     """Reinstall the CLI in place so its entry-point target is rewritten to
     `cliche.launcher:launch_{pkg}` and any legacy `_cliche.py` orphan is
@@ -2329,6 +2288,11 @@ def _apply_launcher_entry(install: dict) -> tuple[bool, str]:
 
 
 MIGRATIONS: list[Migration] = [
+    # Canonical example. The legacy `{pkg}._cliche:main` entry-point format
+    # is no longer produced; any still-matching install here is pre-v0.20.3.
+    # Kept in the registry so (a) a stale clone reinstalled on a fresh box
+    # still auto-upgrades, and (b) future migrations have a reference
+    # implementation of the Migration triad (id + needs + apply).
     Migration(
         id="launcher-entry",
         summary=(
@@ -2338,16 +2302,6 @@ MIGRATIONS: list[Migration] = [
         ),
         needs=lambda install: install.get("entry_value", "").endswith("._cliche:main"),
         apply=_apply_launcher_entry,
-    ),
-    Migration(
-        id="cleanup-legacy-shim",
-        summary=(
-            "Remove orphan `_cliche.py` from the package source tree when "
-            "pyproject is already on the launcher entry but the shim file "
-            "was never cleaned up (e.g. pyproject edited out-of-band)."
-        ),
-        needs=lambda install: _orphan_legacy_shim_path(install) is not None,
-        apply=_apply_cleanup_legacy_shim,
     ),
     # Future migrations: append here. Each gets its own `id`, a pure
     # `needs()` predicate, and an idempotent `apply()`.
@@ -2478,11 +2432,11 @@ def migrate(only: str | None = None, dry_run: bool = False, yes: bool = False) -
             plan.append((inst, needed))
 
     if not plan:
-        print(
-            f"Nothing to migrate: all {len(installs)} cliche-installed CLI(s) "
-            f"are already up to date on the {len(MIGRATIONS)} registered "
-            f"migration(s)."
-        )
+        n_mig = len(MIGRATIONS)
+        mig_word = "migration" if n_mig == 1 else "migrations"
+        cli_word = "CLI" if len(installs) == 1 else "CLIs"
+        print(f"Up to date. ({len(installs)} {cli_word} checked against "
+              f"{n_mig} registered {mig_word} — nothing to do.)")
         return 0
 
     migration_summary = ", ".join(m.id for m in MIGRATIONS)
