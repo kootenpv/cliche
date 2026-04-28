@@ -10,7 +10,6 @@ Regressions caught via the ralph loop:
   (even empty, e.g. a mkdir typo) to subdir layout. Now requires at least
   one .py inside the subdir before promoting.
 """
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -18,9 +17,6 @@ from unittest import mock
 
 import pytest
 
-import sys as _sys
-
-import cliche.install  # noqa: F401 — ensures submodule is in sys.modules
 from cliche.install import (
     AUTO_INIT_MARKER,
     _find_package_dir,
@@ -31,7 +27,7 @@ from cliche.install import (
 # `cliche.install` at the attribute level was rebound to the function by
 # `cliche/__init__.py`'s `from cliche.install import install`. Grab the real
 # submodule out of sys.modules for mock.patch.object targets.
-install_mod = _sys.modules["cliche.install"]
+install_mod = sys.modules["cliche.install"]
 
 
 class TestUpdatePyprojectTomlLayout:
@@ -214,201 +210,30 @@ class TestToolInstallProbe:
 
 
 # ---------------------------------------------------------------------------
-# Session-scoped batching for the real-install tests.
+# Real-install fixtures for the test classes below.
 #
-# All real-install test classes below need a full `cliche install` + binary
-# probe + `cliche uninstall` cycle. Per-class fixtures cost ~450 ms each and
-# run serially — they used to dominate wall time. ONE shared session fixture
-# (`_real_installs`) does the whole thing for every variant (layouts +
-# single-command-dispatch) at once:
-#
-#   1. Workdir generation in parallel (cheap, but boots one Python per call).
-#   2. `cliche install --no-pip` in parallel — file-gen only, layout detection.
-#   3. ONE `pip install -e workA -e workB ... -e workN` for ALL variants —
-#      pip boots once, resolves once. This is the dominant saving.
-#   4. Probes for layout variants in parallel.
-#   5. Uninstalls in parallel at teardown.
-#
-# `layout_installs` / `dispatch_installs` are thin views over `_real_installs`
-# so test signatures stay readable and `pytest -k` filtering still works.
-# Same pattern as `cli_results` in conftest.py / test_e2e.py.
+# Every install spec for the suite lives in conftest.real_installs — ONE
+# batched `pip install -e ...` covers cliche_test, the 4 variants here, and
+# test_cache_freshness's package. Per-file fixtures are thin views.
 # ---------------------------------------------------------------------------
 
-_PING_CLI_SRC = (
-    "from cliche import cli\n"
-    "\n"
-    "@cli\n"
-    "def ping():\n"
-    "    return {'pong': True}\n"
-)
-
-_LAYOUT_SPECS = {
-    "subdir": {
-        "binary": "nc_subdir_bin",
-        "pkg": "subpkg",
-        "layout": "subdir",  # workdir/<pkg>/{__init__,cli}.py
-    },
-    "renamed_flat": {
-        "binary": "nc_renamed_bin",
-        "pkg": "nc_renamed_pkg",
-        "layout": "renamed_flat",  # flat, workdir basename ≠ pkg name
-    },
-}
-
 
 @pytest.fixture(scope="session")
-def _real_installs(tmp_path_factory):
-    """Batched install of every real-install fixture in this file.
-
-    See module-header comment for the staging. Returns a dict keyed by
-    internal variant name with `{spec, work, install, probe}` entries
-    (probe is None for variants that don't need one).
-    """
-    from concurrent.futures import ThreadPoolExecutor
-
-    # Every variant in one place. `kind` decides workdir layout + whether to
-    # run a probe at setup. `src`/`binary`/`pkg` feed the install command.
-    variants: dict = {
-        "layout_subdir": {
-            "kind": "layout_subdir",
-            "binary": _LAYOUT_SPECS["subdir"]["binary"],
-            "pkg": _LAYOUT_SPECS["subdir"]["pkg"],
-            "src": _PING_CLI_SRC,
-            "probe": True,
-        },
-        "layout_renamed_flat": {
-            "kind": "layout_renamed_flat",
-            "binary": _LAYOUT_SPECS["renamed_flat"]["binary"],
-            "pkg": _LAYOUT_SPECS["renamed_flat"]["pkg"],
-            "src": _PING_CLI_SRC,
-            "probe": True,
-        },
-        "scd_single": {
-            "kind": "flat",
-            "binary": _SCD_SINGLE_BINARY,
-            "pkg": None,  # default: dir basename
-            "src": _SCD_SINGLE_SRC,
-            "probe": False,
-        },
-        "scd_multi": {
-            "kind": "flat",
-            "binary": _SCD_MULTI_BINARY,
-            "pkg": None,
-            "src": _SCD_MULTI_SRC,
-            "probe": False,
-        },
-    }
-
-    def _make_workdir(name: str, spec: dict):
-        if spec["kind"] == "layout_subdir":
-            work = tmp_path_factory.mktemp(f"inst_{name}")
-            inner = work / spec["pkg"]
-            inner.mkdir()
-            (inner / "__init__.py").write_text('"""Subdir package."""\n')
-            (inner / "cli.py").write_text(spec["src"])
-        elif spec["kind"] == "layout_renamed_flat":
-            work = tmp_path_factory.mktemp(f"inst_{name}") / "dirname_mismatch"
-            work.mkdir()
-            (work / "__init__.py").write_text('"""Renamed flat package."""\n')
-            (work / "cli.py").write_text(spec["src"])
-        else:  # flat (scd)
-            work = tmp_path_factory.mktemp(f"inst_{name}")
-            (work / "__init__.py").write_text('"""scd test pkg."""\n')
-            (work / "cli.py").write_text(spec["src"])
-        return work
-
-    workdirs: dict = {name: _make_workdir(name, spec) for name, spec in variants.items()}
-
-    # Phase 1: file-gen for every variant in parallel. Each call boots one
-    # Python interpreter (~70 ms), so 4 parallel ≈ one serial ≈ 100 ms total
-    # vs. ~280 ms sequential.
-    def _file_gen(name: str):
-        spec = variants[name]
-        cmd = [_sys.executable, "-m", "cliche.install", "install",
-               spec["binary"], "-d", str(workdirs[name])]
-        if spec["pkg"]:
-            cmd += ["-p", spec["pkg"]]
-        cmd += ["--no-autocomplete", "--force", "--no-pip"]
-        return name, subprocess.run(cmd, capture_output=True, text=True)
-
-    with ThreadPoolExecutor(max_workers=len(variants)) as pool:
-        file_gen_results = dict(pool.map(_file_gen, variants.keys()))
-
-    for name, result in file_gen_results.items():
-        if result.returncode != 0:
-            pytest.fail(
-                f"{name} pyproject generation failed ({result.returncode}):\n"
-                f"stdout: {result.stdout}\nstderr: {result.stderr}"
-            )
-
-    # Phase 2: ONE pip install for every workdir. The big win — pip's startup
-    # / resolver cost is paid once, not once per fixture group.
-    uv_path = shutil.which("uv")
-    if uv_path:
-        pip_cmd = [uv_path, "pip", "install", "--python", _sys.executable]
-    else:
-        pip_cmd = [_sys.executable, "-m", "pip", "install"]
-    for work in workdirs.values():
-        pip_cmd += ["-e", str(work)]
-    pip_result = subprocess.run(pip_cmd, capture_output=True, text=True)
-    if pip_result.returncode != 0:
-        pytest.fail(
-            f"batched editable install failed ({pip_result.returncode}):\n"
-            f"stdout: {pip_result.stdout}\nstderr: {pip_result.stderr}"
-        )
-
-    # Phase 3: probes (only the variants that need one).
-    def _probe(name: str):
-        return name, subprocess.run(
-            [variants[name]["binary"], "ping"],
-            capture_output=True, text=True, cwd=tempfile.gettempdir(),
-        )
-
-    probe_names = [n for n, s in variants.items() if s["probe"]]
-    with ThreadPoolExecutor(max_workers=len(probe_names)) as pool:
-        probes = dict(pool.map(_probe, probe_names))
-
-    results = {
-        name: {
-            "spec": variants[name],
-            "work": workdirs[name],
-            "install": file_gen_results[name],
-            "probe": probes.get(name),
-        }
-        for name in variants
-    }
-
-    try:
-        yield results
-    finally:
-        # Parallel teardown across all variants (was sequential for
-        # dispatch_installs, parallel-but-only-for-2 for layout_installs).
-        def _uninstall(name: str):
-            subprocess.run(
-                [_sys.executable, "-m", "cliche.install", "uninstall",
-                 variants[name]["binary"]],
-                capture_output=True, text=True,
-            )
-        with ThreadPoolExecutor(max_workers=len(variants)) as pool:
-            list(pool.map(_uninstall, variants.keys()))
-
-
-@pytest.fixture(scope="session")
-def layout_installs(_real_installs):
-    """View of `_real_installs` keyed by the public layout-variant names
+def layout_installs(real_installs):
+    """View of `real_installs` keyed by the public layout-variant names
     expected by the layout test classes."""
     return {
         "subdir": {
-            "spec": _LAYOUT_SPECS["subdir"],
-            "work": _real_installs["layout_subdir"]["work"],
-            "install": _real_installs["layout_subdir"]["install"],
-            "probe": _real_installs["layout_subdir"]["probe"],
+            "spec": real_installs["layout_subdir"]["spec"],
+            "work": real_installs["layout_subdir"]["work"],
+            "install": real_installs["layout_subdir"]["install"],
+            "probe": real_installs["layout_subdir"]["probe"],
         },
         "renamed_flat": {
-            "spec": _LAYOUT_SPECS["renamed_flat"],
-            "work": _real_installs["layout_renamed_flat"]["work"],
-            "install": _real_installs["layout_renamed_flat"]["install"],
-            "probe": _real_installs["layout_renamed_flat"]["probe"],
+            "spec": real_installs["layout_renamed_flat"]["spec"],
+            "work": real_installs["layout_renamed_flat"]["work"],
+            "install": real_installs["layout_renamed_flat"]["install"],
+            "probe": real_installs["layout_renamed_flat"]["probe"],
         },
     }
 
@@ -478,37 +303,15 @@ class TestFlatRenamedLayoutForeignCwd:
         assert '"nc_renamed_pkg" = "."' in content
 
 
-_SCD_SINGLE_BINARY = "scd_solo"
-_SCD_MULTI_BINARY = "scd_multi"
-
-_SCD_SINGLE_SRC = (
-    "from cliche import cli\n"
-    "\n"
-    "@cli\n"
-    f"def {_SCD_SINGLE_BINARY}(name: str, times: int = 1):\n"
-    "    for _ in range(times):\n"
-    "        print(f'hi {name}')\n"
-)
-
-_SCD_MULTI_SRC = (
-    "from cliche import cli\n"
-    "\n"
-    "@cli\n"
-    "def solo(name: str):\n"
-    "    print(f'hi {name}')\n"
-    "\n"
-    "@cli\n"
-    "def other(x: int):\n"
-    "    print(x * 2)\n"
-)
-
-
 @pytest.fixture(scope="session")
-def dispatch_installs(_real_installs):
-    """View of `_real_installs` for TestSingleCommandDispatch — just the
+def dispatch_installs(real_installs):
+    """View of `real_installs` for TestSingleCommandDispatch — just the
     binary names. The actual install/uninstall is shared with the layout
-    fixtures via `_real_installs`."""
-    return {"single": _SCD_SINGLE_BINARY, "multi": _SCD_MULTI_BINARY}
+    fixtures via `real_installs` in conftest.py."""
+    return {
+        "single": real_installs["scd_single"]["binary"],
+        "multi": real_installs["scd_multi"]["binary"],
+    }
 
 
 class TestSingleCommandDispatch:

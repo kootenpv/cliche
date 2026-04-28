@@ -108,16 +108,16 @@ COMPLETION_CASES = [
 
 # ---------------------------------------------------------------------------
 # Session fixtures: build clichec, prime the cache, pre-run every parity case.
+#
+# All three pieces of work (cache prime, parity pre-run, clichec build) are
+# fired from conftest at session start as background futures. The fixtures
+# below are thin .result() lookups. See conftest._post_install_warmups.
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="session")
 def clichec_binary(_background_warmups):
-    """Result of the session-start clichec build. Skip if no compiler.
-
-    The actual ensure_built() call lives in conftest._warmup_clichec so it can
-    fire from session start, overlapping with the conftest install.
-    """
+    """Result of the session-start clichec build. Skip if no compiler."""
     p = _background_warmups["clichec"].result()
     if not p:
         pytest.skip("clichec could not be built (no C compiler present)")
@@ -125,26 +125,16 @@ def clichec_binary(_background_warmups):
 
 
 @pytest.fixture(scope="session")
-def primed_cache(cli_binary):
-    """Run the binary once so the cache file exists, then return its path.
+def primed_cache(real_installs, clichec_binary):
+    """Path of the cache file created by `cli_binary --llm-help`.
 
-    clichec is invoked directly (not through the wrapper) — the test owns
-    the `cache_path` argv. We locate the cache file by globbing the
-    XDG_CACHE_HOME tree for the freshest match on the package name.
+    The cache prime ran on a background thread inside conftest's parity
+    warmup, so this fixture is a free .result() lookup. Depends on
+    clichec_binary so the whole module skips if no compiler.
     """
-    subprocess.run(
-        [cli_binary, "--llm-help"], capture_output=True, text=True,
-        env={**os.environ, "NO_COLOR": "1"},
-    )
-    cache_home = Path(os.environ.get("XDG_CACHE_HOME") or
-                      os.path.expanduser("~/.cache"))
-    candidates = sorted((cache_home / "cliche").glob(f"{PKG_NAME}_*.json"),
-                        key=lambda p: p.stat().st_mtime, reverse=True)
-    assert candidates, (
-        f"no cache file found at {cache_home}/cliche/{PKG_NAME}_*.json — "
-        f"did the binary fail to run?"
-    )
-    return str(candidates[0])
+    cache_path, _ = real_installs["_warmups"]["parity"].result()
+    assert cache_path, "parity warmup returned no cache path despite compiler present"
+    return cache_path
 
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -259,13 +249,13 @@ def _run_complete_clichec(clichec: str, cache_path: str, prog_name: str,
 
 
 @pytest.fixture(scope="session")
-def parity_results(cli_binary, clichec_binary, primed_cache):
-    """Pre-run every parity invocation concurrently.
+def parity_results(real_installs, clichec_binary):
+    """Result map of every (Python, clichec) parity invocation.
 
-    Each test then looks up its (kind, test_id) result instead of paying for
-    two subprocess spawns at test time. Same shape as conftest.py:cli_results.
-    Cuts module wall-clock from ~2s to ~0.5s while keeping one pytest test
-    per behaviour (so `pytest -k <name>` still selects single cases).
+    The actual subprocess work ran on a background thread inside conftest's
+    parity warmup (see `compute_parity_warmup` below). This fixture is a
+    .result() lookup. Depends on clichec_binary so the whole module skips
+    cleanly when no compiler is available.
 
     Result map keys:
       ("py",        test_id) → CompletedProcess from running the binary
@@ -273,31 +263,63 @@ def parity_results(cli_binary, clichec_binary, primed_cache):
       ("py_comp",   test_id) → completion candidates string (Python)
       ("c_comp",    test_id) → completion candidates string (clichec)
     """
-    jobs: list[tuple[tuple[str, str], callable]] = []
+    _, results = real_installs["_warmups"]["parity"].result()
+    return results
 
+
+def compute_parity_warmup(cli_binary: str, clichec: str | None) -> tuple[str | None, dict]:
+    """Prime the cache, then pre-run every parity invocation concurrently.
+
+    Returns (cache_path, results_dict). When `clichec` is None the parity
+    pre-run is skipped (no compiler available) and only the cache prime is
+    performed; primed_cache fixture in turn won't be reached because
+    clichec_binary skips first.
+
+    Used from conftest._post_install_warmups so the work runs on a worker
+    thread concurrently with test_cache_freshness's tests + test_auto_apply,
+    instead of blocking when test_clichec_parity's first test fires.
+    """
+    # Cache prime: run the binary once with --llm-help so the JSON cache file
+    # is materialised at XDG_CACHE_HOME/cliche/<pkg>_<hash>.json.
+    subprocess.run(
+        [cli_binary, "--llm-help"], capture_output=True, text=True,
+        env={**os.environ, "NO_COLOR": "1"},
+    )
+    cache_home = Path(os.environ.get("XDG_CACHE_HOME") or
+                      os.path.expanduser("~/.cache"))
+    candidates = sorted((cache_home / "cliche").glob(f"{PKG_NAME}_*.json"),
+                        key=lambda p: p.stat().st_mtime, reverse=True)
+    if not candidates:
+        return None, {}
+    cache_path = str(candidates[0])
+
+    if clichec is None:
+        # No compiler — parity tests will skip via clichec_binary fixture.
+        return cache_path, {}
+
+    jobs: list[tuple[tuple[str, str], callable]] = []
     for tid, argv in PARITY_ARGV:
         jobs.append((("py", tid), lambda av=argv: _run_python(cli_binary, av)))
         jobs.append((("c",  tid), lambda av=argv: _run_clichec(
-            clichec_binary, primed_cache, cli_binary, av)))
-
+            clichec, cache_path, cli_binary, av)))
     for tid, argv, _toks in CONTENT_PARITY_ARGV:
         jobs.append((("py", tid), lambda av=argv: _run_python(cli_binary, av)))
         jobs.append((("c",  tid), lambda av=argv: _run_clichec(
-            clichec_binary, primed_cache, cli_binary, av)))
-
+            clichec, cache_path, cli_binary, av)))
     for tid, comp_line in COMPLETION_CASES:
         line = comp_line.replace("<bin>", cli_binary)
         jobs.append((("py_comp", tid), lambda ln=line: _run_complete(
             cli_binary, ln)))
         jobs.append((("c_comp",  tid), lambda ln=line: _run_complete_clichec(
-            clichec_binary, primed_cache, cli_binary, ln)))
+            clichec, cache_path, cli_binary, ln)))
 
     def _exec(item):
         key, fn = item
         return key, fn()
 
     with ThreadPoolExecutor(max_workers=8) as pool:
-        return dict(pool.map(_exec, jobs))
+        results = dict(pool.map(_exec, jobs))
+    return cache_path, results
 
 
 # ---------------------------------------------------------------------------
@@ -394,7 +416,8 @@ def test_clichec_completion_matches_python(parity_results, test_id, comp_line):
         )
 
 
-def test_auto_apply_on_cliche_install(tmp_path_factory, clichec_binary):
+def test_auto_apply_on_cliche_install(tmp_path_factory, clichec_binary,
+                                      cli_results, parity_results):
     """End-to-end: `cliche install <name>` writes a fast-shim wrapper, and
     a subsequent `pip install -e .` overwrite is auto-healed on first run.
 
@@ -408,7 +431,15 @@ def test_auto_apply_on_cliche_install(tmp_path_factory, clichec_binary):
     Skip when no compiler — fast-shim never gets installed in that
     environment regardless, and the auto-apply branch is correctly a no-op
     (so there's nothing to assert about).
+
+    `cli_results` and `parity_results` are declared as fixture deps NOT
+    because the test reads them, but to force the background pre-runs (which
+    invoke the cliche_test binary, importing from site-packages) to finish
+    before this test runs `pip install ap_test_bin`. That removes the only
+    site-packages read/write race in the suite.
     """
+    del cli_results, parity_results  # only used as ordering guards
+
     import shutil
     import sys
     from cliche._clichec import is_fast_shim, WRAPPER_MARKER

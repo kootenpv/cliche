@@ -24,7 +24,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -34,44 +33,16 @@ import pytest
 PKG_NAME = "cliche_freshness_pkg"
 BINARY = "nc_freshness_bin"
 
-_INITIAL_CLI_SRC = (
-    "from cliche import cli\n"
-    "\n"
-    "@cli\n"
-    "def hello():\n"
-    '    """Greeter."""\n'
-    '    return {"v": 1}\n'
-)
-
 
 @pytest.fixture(scope="module")
-def freshness_env(tmp_path_factory):
-    """Install a one-function package once; tests mutate it in place."""
-    work = tmp_path_factory.mktemp("freshness")
+def freshness_env(real_installs):
+    """View of conftest's `real_installs["freshness"]` — install lifecycle is
+    shared with the rest of the suite (one batched pip). Tests mutate the
+    package directory in place; the inner package dir is `work / PKG_NAME`.
+    """
+    work = real_installs["freshness"]["work"]
     pkg_dir = work / PKG_NAME
-    pkg_dir.mkdir()
-    (pkg_dir / "__init__.py").write_text("")
-    (pkg_dir / "cli.py").write_text(_INITIAL_CLI_SRC)
-
-    install = subprocess.run(
-        [sys.executable, "-m", "cliche.install", "install",
-         BINARY, "-d", str(pkg_dir),
-         "--no-autocomplete", "--force"],
-        capture_output=True, text=True,
-    )
-    if install.returncode != 0:
-        pytest.fail(
-            f"install failed ({install.returncode}):\n"
-            f"stdout: {install.stdout}\nstderr: {install.stderr}"
-        )
-
-    try:
-        yield BINARY, pkg_dir
-    finally:
-        subprocess.run(
-            [sys.executable, "-m", "cliche.install", "uninstall", BINARY],
-            capture_output=True, text=True,
-        )
+    yield BINARY, pkg_dir
 
 
 def _bump_mtime(path: Path) -> None:
