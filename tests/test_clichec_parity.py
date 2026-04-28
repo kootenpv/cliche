@@ -112,13 +112,16 @@ COMPLETION_CASES = [
 
 
 @pytest.fixture(scope="session")
-def clichec_binary():
-    """Build clichec once per session. Skip the whole module if no compiler."""
-    from cliche._clichec import ensure_built
-    p = ensure_built(verbose=False)
+def clichec_binary(_background_warmups):
+    """Result of the session-start clichec build. Skip if no compiler.
+
+    The actual ensure_built() call lives in conftest._warmup_clichec so it can
+    fire from session start, overlapping with the conftest install.
+    """
+    p = _background_warmups["clichec"].result()
     if not p:
         pytest.skip("clichec could not be built (no C compiler present)")
-    return str(p)
+    return p
 
 
 @pytest.fixture(scope="session")

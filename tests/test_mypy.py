@@ -15,9 +15,6 @@ Skipped entirely when mypy isn't installed, so the suite remains runnable
 without `.[test]` extras.
 """
 import importlib.util
-import subprocess
-import sys
-import textwrap
 
 import pytest
 
@@ -166,43 +163,14 @@ KNOWN_BAD_PROBES: dict[str, tuple[str, str]] = {
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="session")
-def mypy_results(tmp_path_factory) -> dict[str, list[str]]:
-    """Run mypy once over every probe; return {probe_name: [error_lines...]}.
+def mypy_results(_background_warmups) -> dict[str, list[str]]:
+    """Result of the session-start mypy warmup. Blocks only if not yet done.
 
-    Key optimisation: mypy's startup + typeshed load is ~hundreds of ms; doing
-    it per-test would balloon wall-clock for no analysis benefit. Batching
-    into one invocation drops this suite from ~5 s to ~1 s.
+    The actual run lives in conftest._warmup_mypy so it can fire at session
+    start in a worker thread, overlapping with the conftest install. Same
+    return shape as before; tests don't care that the work moved.
     """
-    workdir = tmp_path_factory.mktemp("mypy_probes")
-    probes: dict[str, str] = {
-        **CLEAN_PROBES,
-        **{name: src for name, (src, _) in KNOWN_BAD_PROBES.items()},
-    }
-    files: list[str] = []
-    for name, source in probes.items():
-        p = workdir / f"{name}.py"
-        p.write_text(textwrap.dedent(source).lstrip() + "\n")
-        files.append(str(p))
-
-    proc = subprocess.run(
-        [sys.executable, "-m", "mypy",
-         "--no-error-summary",
-         "--follow-imports=silent",
-         "--cache-dir", str(workdir / ".mypy_cache"),
-         *files],
-        capture_output=True, text=True,
-    )
-
-    # Mypy emits `<path>:<line>: <severity>: <msg>` per finding. Bucket lines
-    # by probe filename so each test sees only its own output.
-    by_name: dict[str, list[str]] = {name: [] for name in probes}
-    for line in proc.stdout.splitlines():
-        for name in probes:
-            prefix = str(workdir / f"{name}.py") + ":"
-            if line.startswith(prefix):
-                by_name[name].append(line)
-                break
-    return by_name
+    return _background_warmups["mypy"].result()
 
 
 def _check_clean(results: dict[str, list[str]], name: str) -> None:
