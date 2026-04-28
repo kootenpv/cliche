@@ -166,6 +166,19 @@ def cmd_deploy(args: argparse.Namespace) -> None:
     uv = _require_uv()
     version = _read_version()
 
+    # Guarantee llms.txt on disk (and therefore in the wheel/sdist) matches the
+    # current `cliche --llm-help` output. `deploy` runs against an already-
+    # committed state, so if the refresh changes anything the user must commit
+    # it before publishing — refusing here is safer than silently shipping a
+    # snapshot whose committed copy on GitHub disagrees with the wheel on PyPI.
+    if _refresh_llms_txt():
+        sys.exit(
+            "error: llms.txt was out of date and has been regenerated. "
+            "commit it before deploying:\n"
+            "    git add llms.txt && git commit -m 'refresh llms.txt'\n"
+            "then re-run `python deploy.py deploy`."
+        )
+
     _clean_dist()
     _run([uv, "build"])
     _publish(uv, args.test)
