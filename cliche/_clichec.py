@@ -38,8 +38,49 @@ def _binary_name() -> str:
     return f"clichec-{v}"
 
 
-def binary_path() -> Path:
+def _bundled_binary() -> Path | None:
+    """Path to a clichec binary shipped inside the wheel, or None.
+
+    Platform-specific wheels (e.g. linux-x86_64, macos-arm64) include a
+    pre-compiled `cliche/_bin/clichec` so users on those platforms get the
+    fast path without needing a C compiler. The pure `py3-none-any`
+    fallback wheel ships the .c source only — `ensure_built()` then
+    compiles on first use.
+    """
+    p = Path(__file__).parent / "_bin" / "clichec"
+    try:
+        if p.exists() and os.access(p, os.X_OK):
+            return p
+    except OSError:
+        pass
+    return None
+
+
+def _user_compile_target() -> Path:
+    """Where `build()` writes the user-compiled clichec binary.
+
+    Lives under XDG_DATA_HOME so it survives Python venv churn (`pip install`
+    inside a fresh venv won't trigger another compile if the binary still
+    matches the cliche version). Always a writable location, never the
+    package's own directory — that's read-only on system installs.
+    """
     return _state_dir() / _binary_name()
+
+
+def binary_path() -> Path:
+    """Path to a usable clichec binary, preferring a wheel-bundled one.
+
+    Used by `install_fast_shim` to embed an absolute clichec path into the
+    shell wrapper. Returning the bundled path when present means the
+    wrapper points directly at the binary inside site-packages (no
+    XDG_DATA_HOME indirection), surviving `XDG_DATA_HOME` changes. Falling
+    back to the user-cache target lets the same logic work for the pure
+    fallback wheel where the user compiled clichec themselves.
+    """
+    bundled = _bundled_binary()
+    if bundled is not None:
+        return bundled
+    return _user_compile_target()
 
 
 def _find_cc() -> str | None:
@@ -50,15 +91,17 @@ def _find_cc() -> str | None:
 
 
 def build(verbose: bool = False) -> Path | None:
-    """Compile clichec.c → ``binary_path()``. Returns the path on success.
+    """Compile clichec.c → user-cache target. Returns the path on success.
 
-    Idempotent: if the binary already exists and is newer than the source, skip.
-    Returns None on any failure (no compiler, source missing, compile error).
+    Idempotent: if the user-cache binary already exists and is newer than
+    the source, skip. Returns None on any failure (no compiler, source
+    missing, compile error). Always writes to the user cache, never the
+    bundled location — package directories are read-only on system installs.
     """
     src = source_path()
     if not src.exists():
         return None
-    out = binary_path()
+    out = _user_compile_target()
     try:
         if out.exists() and out.stat().st_mtime >= src.stat().st_mtime:
             return out
@@ -88,8 +131,22 @@ def build(verbose: bool = False) -> Path | None:
 
 
 def ensure_built(verbose: bool = False) -> Path | None:
-    """Return path to a usable clichec binary, building it on first call."""
-    out = binary_path()
+    """Return path to a usable clichec binary, preferring bundled-then-built.
+
+    Resolution order:
+      1. wheel-bundled binary at `cliche/_bin/clichec` — instant, no compile
+      2. user-cache binary at `$XDG_DATA_HOME/cliche/clichec-<ver>` — survives
+         Python env churn
+      3. compile from `clichec.c` into the user cache, return that
+      4. None on failure (no compiler available)
+
+    Steps 1–3 short-circuit as soon as one succeeds, so the cost on a wheel
+    user is one `Path.exists()` + `os.access()` call.
+    """
+    bundled = _bundled_binary()
+    if bundled is not None:
+        return bundled
+    out = _user_compile_target()
     if out.exists() and os.access(out, os.X_OK):
         try:
             if out.stat().st_mtime >= source_path().stat().st_mtime:
@@ -152,6 +209,29 @@ exec "$PYTHON" -c "import sys; sys.argv[0] = '$0'; from cliche.launcher import l
 """
 
 
+def _resolve_installed_binary(binary_name: str) -> str | None:
+    """Find the installed shim for `binary_name`, even when the venv's bin
+    dir isn't on the caller's PATH.
+
+    `shutil.which` only sees PATH; running `cliche install` from outside an
+    activated venv (e.g. `python -m cliche.install`) means the freshly-
+    written shim at `<venv>/bin/<name>` is invisible to which() and
+    auto-apply silently fails. We try shutil.which first (covers system
+    installs and activated venvs), then fall back to sysconfig's scripts
+    path (covers fresh-venv installs without activation).
+    """
+    found = shutil.which(binary_name)
+    if found:
+        return found
+    import sysconfig
+    scripts = sysconfig.get_path("scripts")
+    if scripts:
+        candidate = Path(scripts) / binary_name
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
 def install_fast_shim(binary_name: str, package_name: str, pkg_dir: str,
                       verbose: bool = False) -> tuple[bool, str]:
     """Replace the pip-generated console-script for `binary_name` with a shell
@@ -161,7 +241,7 @@ def install_fast_shim(binary_name: str, package_name: str, pkg_dir: str,
     """
     import hashlib
 
-    target = shutil.which(binary_name)
+    target = _resolve_installed_binary(binary_name)
     if not target:
         return False, f"binary '{binary_name}' not on PATH — install it first"
 

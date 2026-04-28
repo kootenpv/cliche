@@ -50,9 +50,24 @@ cliche = "cliche.install:main_cli"
 [tool.hatch.build.targets.wheel]
 packages = ["cliche"]
 
-# Ship the C source for the fast-fail launcher (clichec). It is compiled on
-# demand by `cliche compile-launcher` / `cliche fast-shim` — no wheel-level C
-# extension build, so the wheel stays pure-Python and platform-independent.
+# Hatchling's default include patterns inside `packages` skip non-Python
+# files. The `artifacts` glob explicitly opts the per-platform clichec
+# binary in. The pattern matches nothing on the fallback py3-none-any
+# build (no binary present) — that's intentional and silent.
+artifacts = ["cliche/_bin/clichec"]
+
+# Ship the C source for the fast-fail launcher (clichec). Always present —
+# even on platform-specific wheels — so a user can manually rebuild clichec
+# if the bundled binary becomes incompatible (kernel ABI changes, glibc
+# upgrades, etc). Recompile cost is ~0.5s on cc-equipped hosts.
+#
+# We deliberately do NOT force-include `cliche/_bin` here — hatchling already
+# includes everything inside the `cliche/` package directory by default
+# (Python files plus any data files). When `scripts/build_one_wheel.sh`
+# drops a compiled `cliche/_bin/clichec` in before `python -m build`, hatch
+# picks it up automatically. Adding it to force-include would create a
+# duplicate entry in the wheel zip (UserWarning at build time).
+#
 # Also ship llms.txt at the wheel root so installed packages expose the
 # LLM-oriented CLI guide (regenerated on each release from `cliche --llm-help`).
 [tool.hatch.build.targets.wheel.force-include]

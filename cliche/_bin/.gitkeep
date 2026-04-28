@@ -1,0 +1,6 @@
+# This directory holds the compiled clichec binary in platform-specific
+# wheels (linux-x86_64, macos-arm64, …). For the pure py3-none-any wheel
+# it ships empty — `cliche._clichec.ensure_built()` then compiles
+# clichec.c on first invocation. The .gitkeep file exists only so
+# pyproject.toml's `force-include` of cliche/_bin/ doesn't error when
+# no binary has been dropped in yet.

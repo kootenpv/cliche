@@ -30,3 +30,8 @@ ralph/problems/
 ralph/solved/
 deploy.py
 uv.lock
+
+# Per-platform clichec binaries dropped in by scripts/build_one_wheel.sh
+# during wheel building. Wiped after each build; never committed.
+cliche/_bin/*
+!cliche/_bin/.gitkeep
