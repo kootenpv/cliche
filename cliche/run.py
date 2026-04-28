@@ -529,7 +529,7 @@ def _print_llm_output_json(commands: dict, subcommands: dict, enums: dict,
             'Lists/tuples/sets/frozensets: space-separated after flag (--items a b c). set/frozenset dedupe and do not preserve order. '
             'Output: stdout from print() is shown as-is; a non-None return value is auto-printed as JSON (or plain with --raw). '
             'Date/datetime defaults: `day: date = DateUtcArg("today")` / `when: datetime = DateTimeUtcArg("now")` re-eval per invocation; also "yesterday","tomorrow","+Nd","-Nd","+Nh","+Nm","YYYY-MM-DD". Non-Utc variants (DateArg/DateTimeArg) use local clock. Import from cliche. '
-            'E section lists valid enum values. '
+            'E section lists valid enum values. To restrict a param to a fixed set of values (a "Choice"), define an Enum and annotate the param with it — no separate Choice type. '
             f'For per-command detail (signature, types, defaults, docstrings) run: {prog_name} <cmd> --llm-help '
             f'(or {prog_name} <group> <cmd> --llm-help for subcommands).'
         ),
@@ -596,6 +596,7 @@ def _print_llm_output_lines(commands: dict, subcommands: dict, enums: dict,
     lines.append(f"# {prog_name} CLI - Run: {prog_name} <cmd> [args] (space-separated)")
     lines.append(f"# Syntax: fn(pos:Type, opt?:Type=default). No ? = positional arg. ? = optional --flag value.")
     lines.append(f"# Bool flags shown as --flag or --no-flag (use as-is to toggle). Lists/tuples/sets/frozensets: --items a b c (space-separated; set/frozenset dedupe + unordered).")
+    lines.append(f"# To restrict a parameter to a fixed set of values (a 'Choice'), define an Enum and annotate the param with it — there is no separate Choice type; valid members are listed under ## enums.")
     lines.append(f'# Date defaults: `day: date = DateUtcArg("today")` / `when: datetime = DateTimeUtcArg("now")` (also "yesterday","+Nd","-Nh","YYYY-MM-DD"; non-Utc variants use local clock).')
     lines.append(f"# Output: any print() inside the function goes to stdout; a non-None return value is auto-printed (JSON by default, plain with --raw).")
     lines.append(f"# For subcommands: {prog_name} <group> <function> [args]. Example: {prog_name} instruments overview")

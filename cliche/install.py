@@ -1773,8 +1773,11 @@ Gotchas:
     `flake8-bugbear`. Use `list[T] = []` only when the body really needs to
     mutate the collection.
 
-## Enums
-Both Python `Enum` classes and protobuf `*_pb2.py` enums are auto-detected:
+## Enums (the idiomatic way to add a Choice / fixed value set)
+To restrict a parameter to a fixed set of valid values, define an `Enum` and
+annotate the parameter with it — `cliche` has no separate `Choice` type
+because the enum *is* the choice list. Both Python `Enum` classes and
+protobuf `*_pb2.py` enums are auto-detected:
   - Python: any class inheriting from `Enum` in scanned files.
   - Protobuf: enum values parsed from `_pb2.py` files.
 

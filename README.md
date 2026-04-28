@@ -194,6 +194,9 @@ protobuf `_pb2.py` enums are auto-discovered; their values populate argparse
 `choices`. An invalid value exits with a full list of what IS valid — so
 users fix the typo once, not after staring at a traceback. Inside your
 function the argument is a real enum member, so `match` and type checks work.
+**This is the idiomatic way to add a fixed set of choices to a parameter** —
+declare an `Enum` and annotate the parameter with it; `cliche` has no
+separate `Choice` type because the enum *is* the choice list.
 
 **Pydantic models are first-class.** Annotate a parameter with a `BaseModel`
 subclass and each field becomes its own flag. Pydantic runs full validation
@@ -268,6 +271,12 @@ mytool text upper hello    → HELLO
 ```
 
 ### Enums
+
+The idiomatic way to constrain a parameter to a fixed set of values (i.e. add
+a `choices=` to argparse) is to define an `Enum`. There is no separate
+`Choice` type — annotate the parameter with the enum class and `cliche`
+populates `choices` from its members and coerces the CLI string back to the
+enum member before calling your function.
 
 ```python
 from enum import Enum
