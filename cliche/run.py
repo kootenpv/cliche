@@ -280,6 +280,15 @@ def colorize_help(message: str, stream=None) -> str:
         message,
     )
 
+    # Color subcommand names — argparse renders subparsers indented by 4 spaces
+    # under the choices line. Match only the leading word so the trailing help
+    # text stays uncolored.
+    message = re.sub(
+        r"(\n    )([A-Za-z][\w-]*)",
+        lambda m: m.group(1) + Colors.blue(m.group(2)),
+        message,
+    )
+
     return message
 
 
@@ -315,7 +324,10 @@ class CleanArgumentParser(argparse.ArgumentParser):
     llm_mode = False  # Class-level flag for LLM mode
 
     def __init__(self, *args, **kwargs):
-        kwargs['formatter_class'] = CleanHelpFormatter
+        # setdefault (not overwrite) so callers can opt into RawDescriptionHelpFormatter
+        # for multi-line description blocks; subparsers created via add_parser inherit
+        # this class through parser_class but may pass their own formatter.
+        kwargs.setdefault('formatter_class', CleanHelpFormatter)
         super().__init__(*args, **kwargs)
 
     def print_help(self, file=None):

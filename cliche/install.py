@@ -2716,8 +2716,9 @@ def migrate(only: str | None = None, dry_run: bool = False, yes: bool = False) -
 def main_cli():
     """Entry point for the cliche command."""
     import argparse
+    from cliche.run import CleanArgumentParser
 
-    parser = argparse.ArgumentParser(description="Install or uninstall cliche CLI tools")
+    parser = CleanArgumentParser(prog="cliche", description="Install or uninstall cliche CLI tools")
     # Early --version short-circuit: print just the cliche version and
     # exit, so scripts can do `cliche --version` without triggering the
     # subcommand parser's "required" logic.
