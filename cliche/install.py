@@ -2455,8 +2455,7 @@ def list_installed():
           f"{by_mode['tool']} uv-tool, {masked} masked. "
           f"CMDS = @cli count from runtime cache ({cache_dir}); '?' = cache not yet created.")
     print(f"SHIM: {n_c} via clichec (C, ~3 ms fast-fail), {n_py} via Python shim "
-          f"(~50 ms cold start). Run `cliche fast-shim <name>` to rewrap; "
-          f"`cliche fast-shim <name> --restore` to undo.")
+          f"(~50 ms cold start). Python shims auto-upgrade to clichec on next run.")
     if masked:
         print("MASKED = typing this binary runs a different package's code (or no shim "
               "exists). Uninstall the masked entry to clean up the duplicate.")
@@ -2816,59 +2815,13 @@ def main_cli():
         help="Skip the interactive confirmation prompt.",
     )
 
-    # compile-launcher subcommand: build the C fast-fail launcher binary.
-    compile_parser = subparsers.add_parser(
-        "compile-launcher",
-        help="Build the C fast-fail launcher (clichec); used by `cliche fast-shim`",
-    )
-    compile_parser.add_argument(
-        "--verbose", "-v", action="store_true",
-        help="Show the compile command and any compiler diagnostics.",
-    )
-
-    # fast-shim subcommand: rewrite the pip-installed console script as a
-    # shell wrapper that exec's clichec then falls back to the Python launcher.
-    fastshim_parser = subparsers.add_parser(
-        "fast-shim",
-        help="Replace a cliche-installed binary with a fast-fail shell wrapper",
-        description=(
-            "Replaces the pip-generated Python shim for `name` with a shell\n"
-            "wrapper that exec's the C launcher (clichec) on every invocation.\n"
-            "clichec services help, --llm-help, unknown-command suggestions,\n"
-            "and stale-cache detection without ever starting Python — typical\n"
-            "fast-fail latency drops from ~36ms to ~3ms. Anything clichec\n"
-            "can't handle (real dispatch, --pdb/--pip/--uv, complex --help)\n"
-            "exits 64 and the wrapper transparently falls through to the\n"
-            "Python launcher. Reinstalling via pip will overwrite the shim;\n"
-            "rerun this command to restore it."
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    fastshim_parser.add_argument(
-        "name", nargs="?",
-        help="Binary name to rewrap (omit with --all to rewrap every cliche-managed binary).",
-    )
-    fastshim_parser.add_argument(
-        "--package-name", "-p",
-        help="Python import name (defaults to the package backing this entry point).",
-    )
-    fastshim_parser.add_argument(
-        "--all", action="store_true",
-        help="Apply the fast-shim to every cliche-managed binary in this Python environment.",
-    )
-    fastshim_parser.add_argument(
-        "--dry-run", "-n", action="store_true",
-        help="Show what would be rewrapped (or restored) without modifying anything.",
-    )
-    fastshim_parser.add_argument(
-        "--restore", action="store_true",
-        help="Replace any cliche fast-shim wrapper(s) with the canonical Python "
-             "shim. Pair with --all to undo a previous --all in one step.",
-    )
-    fastshim_parser.add_argument(
-        "--verbose", "-v", action="store_true",
-        help="Print the compile command and wrapper rewrite location.",
-    )
+    # The C fast-fail launcher (clichec) and the fast-shim wrapper that
+    # exec's it are now applied automatically: `cliche install` calls
+    # `install_fast_shim` directly, and any surviving Python shim
+    # auto-upgrades on its next invocation via launcher._maybe_self_upgrade_shim.
+    # The previously-exposed `compile-launcher` and `fast-shim` subcommands
+    # were redundant with that auto path and have been removed; the underlying
+    # functions in cliche._clichec remain available for internal callers.
 
     args = parser.parse_args()
 
@@ -2886,143 +2839,6 @@ def main_cli():
         list_installed()
     elif args.command == "migrate":
         sys.exit(migrate(only=args.only, dry_run=args.dry_run, yes=args.yes))
-    elif args.command == "compile-launcher":
-        from cliche._clichec import build, source_path, binary_path
-        if not source_path().exists():
-            print(f"error: {source_path()} not found", file=sys.stderr)
-            sys.exit(1)
-        out = build(verbose=args.verbose)
-        if not out:
-            print("error: clichec compile failed (set CC, install gcc/clang, "
-                  "or rerun with --verbose for the full compiler error)",
-                  file=sys.stderr)
-            sys.exit(1)
-        print(f"clichec built: {out}")
-    elif args.command == "fast-shim":
-        from cliche._clichec import install_fast_shim, restore_python_shim, is_fast_shim
-
-        def _resolve_pkg_dir(pkg: str) -> str | None:
-            """Find the package's on-disk source dir without executing user code."""
-            try:
-                import importlib.util
-                spec = importlib.util.find_spec(pkg)
-            except Exception:
-                return None
-            if not spec:
-                return None
-            if spec.origin and spec.origin != "namespace":
-                return str(Path(spec.origin).parent)
-            if spec.submodule_search_locations:
-                return str(list(spec.submodule_search_locations)[0])
-            return None
-
-        if args.all:
-            if args.name:
-                print("error: pass either a name or --all, not both.", file=sys.stderr)
-                sys.exit(1)
-            # Walk every cliche-managed pip console_scripts entry. uv-tool
-            # installs are intentionally skipped: their binaries live inside
-            # an isolated tool venv, so `find_spec` from this interpreter
-            # can't resolve the package, and the cache hash would be wrong.
-            from importlib.metadata import entry_points
-            ok_n = fail_n = skip_n = 0
-            seen: set[str] = set()
-            verb = "would " if args.dry_run else ""
-            mode = "restore" if args.restore else "rewrap"
-            for ep in entry_points(group="console_scripts"):
-                if ep.name in seen:
-                    continue
-                seen.add(ep.name)
-                pkg = _parse_cliche_entry(ep.value)
-                if not pkg:
-                    continue
-                target = shutil.which(ep.name)
-                if not target:
-                    print(f"  {ep.name:20s} skip (not on PATH)")
-                    skip_n += 1
-                    continue
-                if args.restore:
-                    if not is_fast_shim(target):
-                        print(f"  {ep.name:20s} skip (not a fast-shim wrapper)")
-                        skip_n += 1
-                        continue
-                    if args.dry_run:
-                        print(f"  {ep.name:20s} {verb}restore Python shim at {target}")
-                        ok_n += 1
-                        continue
-                    ok, msg = restore_python_shim(ep.name)
-                    tag = "ok" if ok else "fail"
-                    print(f"  {ep.name:20s} {tag} ({msg})")
-                    if ok: ok_n += 1
-                    else:  fail_n += 1
-                else:
-                    if is_fast_shim(target):
-                        print(f"  {ep.name:20s} skip (already a fast-shim)")
-                        skip_n += 1
-                        continue
-                    pkg_dir = _resolve_pkg_dir(pkg)
-                    if not pkg_dir:
-                        print(f"  {ep.name:20s} skip (cannot resolve {pkg})")
-                        skip_n += 1
-                        continue
-                    if args.dry_run:
-                        print(f"  {ep.name:20s} {verb}{mode} -> pkg={pkg}, pkg_dir={pkg_dir}")
-                        ok_n += 1
-                        continue
-                    ok, msg = install_fast_shim(ep.name, pkg, pkg_dir,
-                                                verbose=args.verbose)
-                    tag = "ok" if ok else "fail"
-                    print(f"  {ep.name:20s} {tag} ({msg})")
-                    if ok: ok_n += 1
-                    else:  fail_n += 1
-            tag = "(dry-run) " if args.dry_run else ""
-            print(f"fast-shim {mode}: {tag}{ok_n} ok, {fail_n} fail, {skip_n} skip")
-            sys.exit(0 if fail_n == 0 else 1)
-
-        if not args.name:
-            print("error: pass a binary name (or --all to do every cliche binary).",
-                  file=sys.stderr)
-            sys.exit(1)
-
-        if args.restore:
-            target = shutil.which(args.name)
-            if not target:
-                print(f"error: '{args.name}' is not on PATH.", file=sys.stderr)
-                sys.exit(1)
-            if args.dry_run:
-                if is_fast_shim(target):
-                    print(f"would restore Python shim at {target}")
-                else:
-                    print(f"{target} is not a fast-shim wrapper (no-op)")
-                sys.exit(0)
-            ok, msg = restore_python_shim(args.name)
-            print(msg)
-            sys.exit(0 if ok else 1)
-
-        pkg = args.package_name
-        if not pkg:
-            ep = _existing_entry_point(args.name)
-            if not ep:
-                print(f"error: '{args.name}' is not a cliche-managed entry point. "
-                      f"Install it via `cliche install` first, or pass --package-name.",
-                      file=sys.stderr)
-                sys.exit(1)
-            pkg = ep.get("pkg")
-        if not pkg:
-            print(f"error: cannot infer package for '{args.name}'; pass "
-                  f"--package-name explicitly.", file=sys.stderr)
-            sys.exit(1)
-        pkg_dir = _resolve_pkg_dir(pkg)
-        if not pkg_dir:
-            print(f"error: package '{pkg}' not importable in this environment.",
-                  file=sys.stderr)
-            sys.exit(1)
-        if args.dry_run:
-            print(f"would rewrap {shutil.which(args.name)} -> pkg={pkg}, pkg_dir={pkg_dir}")
-            sys.exit(0)
-        ok, msg = install_fast_shim(args.name, pkg, pkg_dir, verbose=args.verbose)
-        print(msg)
-        sys.exit(0 if ok else 1)
     else:
         parser.print_help()
 
