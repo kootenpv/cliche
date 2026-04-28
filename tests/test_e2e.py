@@ -87,6 +87,35 @@ def test_echo_enum_default_overridden_by_flag(cli_results):
     assert _data(cli_results, "enum_default_set") == {"color": "blue"}
 
 
+# ---------- IntEnum ----------
+
+def test_echo_int_enum_accepts_valid_member(cli_results):
+    """IntEnum should be handled the same as Enum: lookup by member name,
+    and the function receives a real enum instance (also an int)."""
+    assert _data(cli_results, "intenum_ok") == {
+        "name": "HIGH",
+        "value": 10,
+        "is_priority": True,
+        "is_int": True,
+    }
+
+
+def test_echo_int_enum_rejects_invalid_member(cli_results):
+    p = cli_results["intenum_bad"]
+    assert p.returncode != 0
+    assert "URGENT" in p.stderr
+
+
+def test_echo_int_enum_default_uses_source_literal(cli_results):
+    """`level: Priority = Priority.MEDIUM` — the qualified default literal
+    must be stripped and looked up as an IntEnum member."""
+    assert _data(cli_results, "intenum_default") == {"name": "MEDIUM", "value": 5}
+
+
+def test_echo_int_enum_default_overridden_by_flag(cli_results):
+    assert _data(cli_results, "intenum_default_set") == {"name": "LOW", "value": 1}
+
+
 # ---------- Path coercion ----------
 
 def test_echo_path_is_real_path_instance(cli_results):

@@ -5,7 +5,7 @@ Each function returns a JSON-serialisable dict so tests can
 small — this is fixture code, not example code.
 """
 from datetime import date, datetime
-from enum import Enum
+from enum import Enum, IntEnum
 from pathlib import Path
 
 from cliche import cli
@@ -16,6 +16,12 @@ class Color(Enum):
     RED = "red"
     GREEN = "green"
     BLUE = "blue"
+
+
+class Priority(IntEnum):
+    LOW = 1
+    MEDIUM = 5
+    HIGH = 10
 
 
 class Config(BaseModel):
@@ -84,6 +90,25 @@ def echo_enum_default(color: Color = Color.RED):
     """Source-parsed Enum default stored as string literal `Color.RED` —
     must be converted to the real enum member before the function runs."""
     return {"color": color.value}
+
+
+@cli
+def echo_int_enum(level: Priority):
+    """Positional IntEnum param — `Priority` inherits from `IntEnum`,
+    so `level` should arrive as the real enum member (which is also an int)."""
+    return {
+        "name": level.name,
+        "value": int(level),
+        "is_priority": isinstance(level, Priority),
+        "is_int": isinstance(level, int),
+    }
+
+
+@cli
+def echo_int_enum_default(level: Priority = Priority.MEDIUM):
+    """IntEnum default written in qualified form — must be converted to
+    the real enum member before the function runs (same path as Enum)."""
+    return {"name": level.name, "value": int(level)}
 
 
 # ---------- pydantic ----------

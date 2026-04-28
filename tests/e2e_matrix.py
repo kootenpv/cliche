@@ -24,6 +24,12 @@ E2E_ARGV_MATRIX: dict[str, list[str]] = {
     "enum_default":       ["echo-enum-default"],  # regression: Color.RED qualified default
     "enum_default_set":   ["echo-enum-default", "--color", "BLUE"],
 
+    # IntEnum
+    "intenum_ok":           ["echo-int-enum", "HIGH"],
+    "intenum_bad":          ["echo-int-enum", "URGENT"],
+    "intenum_default":      ["echo-int-enum-default"],
+    "intenum_default_set":  ["echo-int-enum-default", "--level", "LOW"],
+
     # Path coercion + container element coercion
     "path_single":        ["echo-path", "/etc/passwd"],
     "path_list":          ["echo-path-list", "/etc/passwd", "/etc/hosts"],
