@@ -23,6 +23,7 @@ from pathlib import Path
 # `register-python-argcomplete` is on PATH at shell startup (ships with
 # argcomplete); no hard-coded absolute path so the snippet survives venv moves.
 _TAG = "cliche: autocomplete for"  # marker substring for cleanup
+_SECTION_HEADER = "# cliche autocompletes"  # groups all autocomplete lines together
 
 # Each line is wrapped so a broken/missing argcomplete (stale shebang, renamed
 # Python, uninstalled package) can't spam the user's shell on every startup:
@@ -45,13 +46,40 @@ _SHELL_RC_LINES = {
 }
 
 
+def _insert_in_cliche_section(content: str, line: str) -> str:
+    """Insert `line` into the `# cliche autocompletes` block in `content`.
+
+    If the section header already exists, append after the last cliche-tagged
+    line in the file. If only legacy tagged lines exist (no header), prepend
+    the header before the first one — promoting old layouts to the new shape.
+    If neither header nor tagged lines exist, append a fresh section at EOF.
+    """
+    lines = content.splitlines(keepends=True)
+    has_header = any(l.strip() == _SECTION_HEADER for l in lines)
+    cliche_indices = [i for i, l in enumerate(lines)
+                      if _SECTION_HEADER in l or _TAG in l]
+    if cliche_indices:
+        first = cliche_indices[0]
+        last = cliche_indices[-1]
+        if not lines[last].endswith("\n"):
+            lines[last] = lines[last] + "\n"
+        if not has_header:
+            lines.insert(first, f"{_SECTION_HEADER}\n")
+            last += 1
+        lines.insert(last + 1, line + "\n")
+        return "".join(lines)
+    suffix = "" if not content or content.endswith("\n") else "\n"
+    return content + suffix + f"{_SECTION_HEADER}\n{line}\n"
+
+
 def _register_autocomplete(name: str) -> list[str]:
-    """Append the argcomplete hook to each shell rc that exists.
+    """Insert the argcomplete hook into the `# cliche autocompletes` section
+    of each shell rc that exists.
 
     Idempotent: skips rc files that already contain the exact line. Returns the
-    list of rc paths we touched. Never creates new rc files — only appends to
-    ones the user already has, so we don't clutter $HOME for shells the user
-    doesn't use.
+    list of rc paths we touched. Never creates new rc files — only edits ones
+    the user already has, so we don't clutter $HOME for shells the user doesn't
+    use.
     """
     touched = []
     for rc, line_fmt in _SHELL_RC_LINES.items():
@@ -65,10 +93,9 @@ def _register_autocomplete(name: str) -> list[str]:
             continue
         if line in content:
             continue
-        suffix = "" if content.endswith("\n") or not content else "\n"
+        new_content = _insert_in_cliche_section(content, line)
         try:
-            with open(path, "a") as f:
-                f.write(f"{suffix}{line}\n")
+            path.write_text(new_content)
             touched.append(str(path))
         except OSError:
             pass
@@ -87,6 +114,10 @@ def _unregister_autocomplete(name: str) -> list[str]:
         rf'^.*register-python-argcomplete\s+(?:--shell\s+\S+\s+)?{re.escape(name)}\b.*$\n?',
         re.MULTILINE,
     )
+    header_pattern = re.compile(
+        rf'^{re.escape(_SECTION_HEADER)}[ \t]*$\n?',
+        re.MULTILINE,
+    )
     for rc in _SHELL_RC_LINES:
         path = Path(os.path.expanduser(rc))
         if not path.exists():
@@ -96,6 +127,10 @@ def _unregister_autocomplete(name: str) -> list[str]:
         except OSError:
             continue
         new_content = pattern.sub('', content)
+        # If no cliche-tagged lines remain anywhere, the section header is
+        # orphaned — drop it so the rc file doesn't keep an empty section.
+        if _TAG not in new_content:
+            new_content = header_pattern.sub('', new_content)
         if new_content != content:
             try:
                 path.write_text(new_content)
@@ -1287,17 +1322,134 @@ def _pristine_pyproject(package_name: str) -> str:
     )
 
 
-def _remove_runtime_cache(package_name: str, pkg_dir: Path) -> Path | None:
-    """Delete the runtime cache file keyed by (pkg_name, hash(pkg_dir))."""
-    import hashlib
+def _known_cliche_packages() -> set[str]:
+    """Set of package names currently registered as cliche-installed.
+
+    Same source of truth as `cliche ls`: console_scripts entry points whose
+    target matches our `_cliche` shim, plus uv-tool entries.
+    """
+    from importlib.metadata import entry_points
+    known: set[str] = set()
+    for ep in entry_points(group="console_scripts"):
+        pkg_name = _parse_cliche_entry(ep.value)
+        if pkg_name:
+            known.add(pkg_name)
+    for t in _uv_tool_cliche_entries():
+        known.add(t["pkg"])
+    return known
+
+
+def _known_cliche_binaries() -> set[str]:
+    """Set of binary names currently registered as cliche-installed."""
+    from importlib.metadata import entry_points
+    known: set[str] = set()
+    for ep in entry_points(group="console_scripts"):
+        if _parse_cliche_entry(ep.value):
+            known.add(ep.name)
+    for t in _uv_tool_cliche_entries():
+        known.add(t["binary"])
+    return known
+
+
+def _remove_orphan_autocompletes() -> list[str]:
+    """Strip cliche-tagged autocomplete lines for binaries no longer installed.
+
+    Only touches lines bearing our `# cliche: autocomplete for <name>` comment
+    — lines from a different cliche fork (e.g. `# new_cliche: autocomplete
+    for <name>`) are left alone, even though their `register-python-argcomplete`
+    invocation looks identical. Returns the rc paths actually modified.
+    """
+    known = _known_cliche_binaries()
+    # Match a full line whose trailing comment is OUR tag (anchored to `#` so
+    # we don't catch `new_cliche:` as a substring), capturing the binary name
+    # both from the registration call and the comment tag — they always agree
+    # in lines we wrote, so either capture is fine.
+    line_re = re.compile(
+        rf'^.*register-python-argcomplete\s+(?:--shell\s+\S+\s+)?(\S+)\b.*'
+        rf'#\s*{re.escape(_TAG)}\s+(\S+)\s*$\n?',
+        re.MULTILINE,
+    )
+    header_re = re.compile(
+        rf'^{re.escape(_SECTION_HEADER)}[ \t]*$\n?',
+        re.MULTILINE,
+    )
+    touched = []
+    for rc in _SHELL_RC_LINES:
+        path = Path(os.path.expanduser(rc))
+        if not path.exists():
+            continue
+        try:
+            content = path.read_text()
+        except OSError:
+            continue
+
+        def _strip(m: re.Match) -> str:
+            name = m.group(2)  # comment-tag name (canonical)
+            return "" if name not in known else m.group(0)
+
+        new_content = line_re.sub(_strip, content)
+        if _TAG not in new_content:
+            new_content = header_re.sub('', new_content)
+        if new_content != content:
+            try:
+                path.write_text(new_content)
+                touched.append(str(path))
+            except OSError:
+                pass
+    return touched
+
+
+def _remove_orphan_caches() -> list[Path]:
+    """Delete cache files belonging to packages no longer in `cliche ls`.
+
+    A cache file is `<pkg>_<8-hex-hash>.json`. If `<pkg>` isn't a currently-
+    installed cliche package, the file is dead weight — left over from a
+    previous install at a different path, an uninstall that ran before the
+    cache-cleanup logic existed, or a one-shot test package.
+    """
     cache_home = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
     cache_dir = Path(cache_home) / "cliche"
-    dir_hash = hashlib.md5(str(pkg_dir).encode()).hexdigest()[:8]
-    cache_file = cache_dir / f"{package_name}_{dir_hash}.json"
-    if cache_file.exists():
-        cache_file.unlink()
-        return cache_file
-    return None
+    if not cache_dir.is_dir():
+        return []
+    known = _known_cliche_packages()
+    removed = []
+    for cache_file in cache_dir.glob("*_????????.json"):
+        # Strip the trailing `_<8hex>` to recover the package name. Package
+        # names can contain `_` themselves (e.g. `cliche_pkg_complex`), so
+        # split from the right.
+        stem = cache_file.stem
+        pkg = stem.rsplit("_", 1)[0]
+        if pkg and pkg not in known:
+            try:
+                cache_file.unlink()
+                removed.append(cache_file)
+            except OSError:
+                pass
+    return removed
+
+
+def _remove_runtime_cache(package_name: str) -> list[Path]:
+    """Delete every runtime cache file belonging to `package_name`.
+
+    Cache files are named `<package_name>_<8-hex-hash>.json`, where the hash
+    is derived from the package source dir. If the source dir has moved (or
+    the package was reinstalled from different paths over time) several stale
+    files can accumulate, so we glob by package name and remove every match.
+    The 8 `?` wildcards lock the suffix to exactly the hash shape so a name
+    like `cliche` doesn't accidentally sweep up `cliche_test_*.json`.
+    """
+    cache_home = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
+    cache_dir = Path(cache_home) / "cliche"
+    if not cache_dir.is_dir():
+        return []
+    removed = []
+    for cache_file in cache_dir.glob(f"{package_name}_????????.json"):
+        try:
+            cache_file.unlink()
+            removed.append(cache_file)
+        except OSError:
+            pass
+    return removed
 
 
 def _remove_egg_info(directory: Path, package_name: str) -> list[Path]:
@@ -1561,11 +1713,6 @@ def uninstall(name: str, module_dir: str = None, pkg: str = None, **kwargs):
             except OSError:
                 pass
 
-        # Runtime cache
-        cache_file = _remove_runtime_cache(package_name, pkg_dir)
-        if cache_file:
-            cleaned.append(f"runtime cache {cache_file}")
-
         # *.egg-info
         for egg in _remove_egg_info(directory, package_name):
             cleaned.append(str(egg))
@@ -1575,6 +1722,25 @@ def uninstall(name: str, module_dir: str = None, pkg: str = None, **kwargs):
         if pycache.is_dir():
             shutil.rmtree(pycache)
             cleaned.append(str(pycache))
+
+    # Runtime cache: glob by package name so stale entries from previous source
+    # dirs get swept too. Runs even when `directory` is None — the cache lives
+    # in ~/.cache/cliche and doesn't depend on knowing the source dir.
+    for cache_file in _remove_runtime_cache(package_name):
+        cleaned.append(f"runtime cache {cache_file}")
+
+    # Opportunistic sweep: remove cache files for any package that's no longer
+    # registered as cliche-installed. Catches leftovers from old uninstalls
+    # (pre-cleanup-logic), reinstalls at a different path, and ad-hoc test
+    # packages that never made it into entry points.
+    for cache_file in _remove_orphan_caches():
+        cleaned.append(f"orphan cache {cache_file}")
+
+    # Same idea for shell rc files: strip cliche-tagged autocomplete lines
+    # whose binary isn't registered anymore. Lines from other forks (different
+    # comment tag) are preserved.
+    for rc in _remove_orphan_autocompletes():
+        cleaned.append(f"orphan autocomplete lines in {rc}")
 
     # Shell autocomplete: strip the hook from every rc we know about. Safe to
     # run even for tool-less / non-autocomplete installs — it's a no-op when
