@@ -34,6 +34,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 PYPROJECT = ROOT / "pyproject.toml"
+LLMS_TXT = ROOT / "llms.txt"
 VERSION_RE = re.compile(r'^version\s*=\s*["\']([^"\']+)["\']', re.MULTILINE)
 
 
@@ -79,6 +80,34 @@ def _read_version() -> str:
     return m.group(1)
 
 
+def _refresh_llms_txt() -> bool:
+    """Regenerate llms.txt from `cliche --llm-help`. Returns True if it changed.
+
+    Run before any commit-creating release step so the checked-in file (and the
+    sdist/wheel that pick it up via pyproject.toml) stays in sync with the CLI.
+    Falls back gracefully if `cliche` isn't on PATH — better to release without
+    refreshing than to block on a missing dev install.
+    """
+    cliche_bin = shutil.which("cliche")
+    if not cliche_bin:
+        print("warning: `cliche` not on PATH; skipping llms.txt refresh", file=sys.stderr)
+        return False
+    result = subprocess.run([cliche_bin, "--llm-help"], capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"warning: `cliche --llm-help` exited {result.returncode}; skipping llms.txt refresh",
+              file=sys.stderr)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+        return False
+    new = result.stdout
+    old = LLMS_TXT.read_text() if LLMS_TXT.exists() else None
+    if old == new:
+        return False
+    LLMS_TXT.write_text(new)
+    print(f"refreshed llms.txt ({len(new)} bytes)")
+    return True
+
+
 def cmd_bump(args: argparse.Namespace) -> None:
     uv = _require_uv()
     before = _read_version()
@@ -89,7 +118,11 @@ def cmd_bump(args: argparse.Namespace) -> None:
     after = _read_version()
     print(f"bumped: {before} → {after}")
     if args.commit:
-        _run(["git", "add", str(PYPROJECT)])
+        _refresh_llms_txt()
+        to_add = [str(PYPROJECT)]
+        if LLMS_TXT.exists():
+            to_add.append(str(LLMS_TXT))
+        _run(["git", "add", *to_add])
         _run(["git", "commit", "-m", f"release: {after}"])
         _run(["git", "tag", f"v{after}"])
         print(f"committed + tagged v{after} (push with: git push && git push --tags)")
@@ -170,24 +203,31 @@ def cmd_release(args: argparse.Namespace) -> None:
         sys.exit("error: nothing staged. `release` bundles staged changes into the release commit. "
                  "either stage files (git add) or use `bump --commit` + `deploy` for a plain version-only release.")
 
-    # 1. Bump version in pyproject.toml.
+    # 1. Refresh llms.txt from `cliche --llm-help` and stage it immediately,
+    #    so the snapshot shipped on PyPI tracks this release and the file
+    #    isn't left as a phantom unstaged change in the working tree.
+    if _refresh_llms_txt() and LLMS_TXT.exists():
+        _run(["git", "add", str(LLMS_TXT)])
+
+    # 2. Bump version in pyproject.toml.
     before = _read_version()
     _run([uv, "version", "--bump", args.part, "--frozen"])
     version = _read_version()
     tag = f"v{version}"
     print(f"bumped: {before} → {version}")
 
-    # 2. Build now — fail fast if the tree is broken, before touching git.
+    # 3. Build now — fail fast if the tree is broken, before touching git.
+    #    The build picks up the freshly-written llms.txt from disk.
     _clean_dist()
     _run([uv, "build"])
 
-    # 3. Stage pyproject.toml alongside whatever the user already staged,
+    # 4. Stage pyproject.toml alongside whatever the user already staged,
     #    then single commit + tag.
     _run(["git", "add", str(PYPROJECT)])
     _run(["git", "commit", "-m", f"{args.message} (v{version})"])
     _run(["git", "tag", tag])
 
-    # 4. Publish. If this fails, the commit/tag exist locally but not on
+    # 5. Publish. If this fails, the commit/tag exist locally but not on
     #    remote — roll back with: git tag -d vX.Y.Z && git reset HEAD~1
     try:
         _publish(uv, args.test)
@@ -196,7 +236,7 @@ def cmd_release(args: argparse.Namespace) -> None:
         print(f"    git tag -d {tag} && git reset --soft HEAD~1", file=sys.stderr)
         sys.exit(1)
 
-    # 5. Push commit + tag.
+    # 6. Push commit + tag.
     if not args.no_push:
         _run(["git", "push"])
         _run(["git", "push", "origin", tag])

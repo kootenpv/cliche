@@ -53,13 +53,17 @@ packages = ["cliche"]
 # Ship the C source for the fast-fail launcher (clichec). It is compiled on
 # demand by `cliche compile-launcher` / `cliche fast-shim` — no wheel-level C
 # extension build, so the wheel stays pure-Python and platform-independent.
+# Also ship llms.txt at the wheel root so installed packages expose the
+# LLM-oriented CLI guide (regenerated on each release from `cliche --llm-help`).
 [tool.hatch.build.targets.wheel.force-include]
 "cliche/clichec.c" = "cliche/clichec.c"
+"llms.txt" = "llms.txt"
 
 [tool.hatch.build.targets.sdist]
 include = [
     "cliche",
     "tests",
     "README.md",
+    "llms.txt",
     "pyproject.toml",
 ]

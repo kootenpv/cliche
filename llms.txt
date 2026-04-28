@@ -1,0 +1,371 @@
+# cliche — LLM guide for building CLI tools
+
+## Overview
+cliche turns any Python package into a fast CLI by scanning for @cli-decorated
+functions via AST (not imports), caching results by mtime, and lazy-importing only
+the module of the function actually invoked. Startup stays sub-100ms even for large
+packages.
+
+## Minimal workflow
+    cd my_project/                         # a dir with .py files
+    cliche install mytool              # creates __init__.py, pyproject.toml,
+                                           # runs `pip install -e .`
+    mytool <command> [args...]             # run any @cli function
+    cliche uninstall mytool            # remove the entry point
+    cliche ls                          # show every CLI installed via cliche
+    cliche migrate                     # re-align existing installs with the
+                                           # current cliche entry-point format
+
+DO NOT pre-create pyproject.toml or __init__.py yourself — `install` generates
+them. If pyproject.toml already exists, `install` edits it in place (adds
+[project.scripts] and dependencies). Just run `install` in any directory
+with .py files. Cliche writes NO `.py` files into your package; the entry
+point routes through `cliche.launcher:launch_<pkg>` (a cliche-owned trampoline
+that cleans sys.path before importing the user package).
+
+install flags: `-p PKG` (import name if ≠ dir), `-t` (isolated uv tool venv),
+`-f` (force over existing binary name).
+
+Always invoke the installed binary — e.g. `mytool add 2 3`.
+If install fails, fix the install, don't work around it.
+
+## Simplest recipe (use this unless you have a reason not to)
+    cd <your-project-dir>                  # a directory with a real name
+    # write ONE .py file at top level (no subdirectories, no pre-made pyproject)
+    # with `from cliche import cli` and `@cli` on your functions
+    cliche install <binary_name>       # that's it — do NOT pass `.` anywhere
+
+Do NOT create a subdirectory matching the package name yourself — `install`
+handles layout detection. Do NOT pass `.` as a binary name or `--package-name`
+(it's not a valid Python identifier and will be rejected).
+
+## Install modes
+  cliche install mytool            # editable install into the current Python env
+  cliche install mytool --tool     # isolated venv via `uv tool install` (requires uv)
+
+Use `--tool` when you don't want the CLI to pollute your active Python env (e.g.
+you're installing a CLI globally, not as part of a project you're developing).
+Each --tool CLI lives in its own venv under ~/.local/share/uv/tools/<pkg>/;
+manage them with `uv tool {list,upgrade,uninstall}` or `cliche uninstall`.
+`cliche ls` shows MODE = edit / site / tool so you can tell them apart.
+
+IMPORTANT — two distinct names:
+  BINARY NAME  = what you type in the shell      (positional arg to `install`)
+  IMPORT NAME  = what you use in `from X import` (defaults to CURRENT DIR name,
+                 override with `--package-name / -p`)
+
+They are NOT the same thing. Examples:
+
+  # dir = my_project/, want both names to match:
+  cliche install my_project
+    → shell: `my_project ...`   python: `from my_project.cli import x`
+
+  # dir = claude_compress/, want short binary but keep import readable:
+  cliche install clompress --package-name claude_compress
+    → shell: `clompress ...`    python: `from claude_compress.cli import x`
+
+If you installed with mismatched names by accident, `cliche uninstall <binary>`
+then reinstall with `--package-name` set correctly.
+
+After `install`, the binary `mytool` is on PATH. Editing source files does NOT
+require reinstall — the cache auto-updates on each invocation via mtime checks.
+
+IMPORTANT — single-command CLI: if your project has exactly ONE `@cli` function
+and its name equals the binary name (e.g. binary `csv_stats` with function
+`csv_stats`), invoke it WITHOUT repeating the name:
+
+    csv_stats <arg1> <arg2>
+
+Do NOT write `csv_stats csv_stats <arg1> <arg2>` — cliche auto-detects the
+single-command case and dispatches directly.
+
+## The @cli decorator
+    from cliche import cli
+
+    @cli
+    def hello(name: str, excited: bool = False):
+        '''Greet someone.'''
+        print(f"Hello {name}{'!' if excited else '.'}")
+
+`@cli` is a no-op at runtime; detection is purely AST-based. That means:
+  - The decorator MUST appear literally as `@cli` or `@cli("group")` in source.
+  - Aliasing (`c = cli; @c`) will NOT be detected.
+  - `@some.cli` or `@some.cli("group")` IS detected (attribute form).
+  - Only the FIRST @cli decorator per function is used.
+
+## Grouping into subcommands
+    @cli("db")
+    def migrate(): ...
+
+    @cli("db")
+    def seed(): ...
+
+Invoked as:  `mytool db migrate`  /  `mytool db seed`
+Ungrouped `@cli` functions are top-level:  `mytool hello Bob --excited`
+
+## Parameter syntax (auto-mapped to argparse)
+Signature element                   → CLI form
+----------------------------------- -------------------------------------------
+`x: str` (no default)               positional, required
+`x: str = "a"` (has default)        `--x VALUE`
+`flag: bool = False`                `--flag`        (store_true)
+`flag: bool = True`                 `--no-flag`     (store_false; see gotcha #3)
+`x: int`, `x: float`                argparse coerces via `type=int` / `type=float`
+`p: Path`                           any str value, arrives as pathlib.Path
+`p: Path = Path("/tmp")`            `--p VALUE`, default = Path("/tmp")
+`p: Path | None = None`             `--p VALUE`, default None (union w/ None)
+`p: Path | str`                     union handler picks the most-specific mapped type (Path)
+`when: date`                        positional, accepts YYYY-MM-DD strictly
+`ts: datetime`                      positional, accepts ISO-8601 (bare date too)
+`items: tuple[int, ...] = ()`       `--items 1 2 3`   (preferred; each element → int)
+`items: tuple[Path, ...] = ()`      `--items a b c`   (preferred; each element → Path)
+`items: tuple[Path, ...]`           positional, nargs='+'  (each element → Path)
+`items: list[int] = []`             `--items 1 2 3`   (works; see mutable-default gotcha)
+`tags: dict[str, int] = {}`         `--tags a=1 b=2`  (KEY=VALUE pairs, K/V coerced)
+`tags: dict[str, Path] = {}`        same but values coerced to Path
+`cfg: MyBaseModel` (pydantic)       each BaseModel field becomes its own `--<field>` flag
+`cfg: MyBaseModel | None = None`    same; union with None forwards through
+`p: MyCallable` (user-defined)      argparse calls MyCallable(token); value is its return
+`mode: MyEnum`                      positional with choices
+`mode: MyEnum.V = MyEnum.FOO`       `--mode FOO` (choices auto-populated)
+`*args`, `**kwargs`                 IGNORED
+`self`, `cls`                       IGNORED (methods auto-instantiate the class)
+
+Underscores in param names become dashes on the CLI (`dry_run` → `--dry-run`);
+both forms are accepted internally. Short flags (e.g. `-n` for `--name`) are
+auto-generated when unambiguous.
+
+Gotchas:
+  - `None` as a default is fine — the arg is just omitted from the call when unset.
+  - Type annotations are parsed from source text, NOT evaluated. That said, the
+    following shapes ARE recognised and get real coercion at argparse time:
+      * primitives: `str`, `int`, `float`, `bool`
+      * `Path` / `pathlib.Path` (+ `Optional[Path]`, `Path | None`, `Path | str`)
+      * `date`, `datetime` (ISO parsing)
+      * container elements: `list[T]`, `tuple[T, ...]` — each element coerced to T
+      * `dict[K, V]` — key/value coerced per annotation
+      * enums (Python `Enum` subclasses and protobuf `*_pb2` enums)
+      * pydantic `BaseModel` subclasses — fields become individual flags
+    Aliased imports (`import pathlib as p; x: p.Path`) are NOT resolved.
+    `list[CustomType]` / `dict[K, CustomType]` fall back to `str` for the unknown
+    side (the known side still coerces).
+  - Defaults are ALSO parsed from source, not evaluated. Recognised literal
+    forms: strings, numbers, True/False/None, tuples/lists of literals, enum
+    member access (`Mode.FAST`), and Path call-form with a string literal
+    (`Path("/tmp")`, `pathlib.Path('/etc')`). Computed expressions
+    (`str(DEFAULT_DB)`, `Path.home()`, `os.getenv(...)`, `Path("/x") / "sub"`,
+    `MY_CONST + 1`) are stored verbatim as a STRING and silently become a
+    bogus default. For computed defaults, use a sentinel (`""` or `None`)
+    and resolve inside the function:
+        def cmd(db_path: str = ""):
+            db_path = db_path or str(DEFAULT_DB)
+  - Return values that are non-None are auto-printed as `json.dumps(result, indent=2)`,
+    falling back to `print(result)` if not JSON-serializable.
+  - `async def` functions are supported and run via `asyncio.run`.
+  - For variadic collection parameters, PREFER `tuple[T, ...] = ()` over
+    `list[T] = []`. Both work identically on the CLI (each invocation is a
+    fresh process, so Python's mutable-default gotcha doesn't cross
+    invocations), but the tuple form (a) sidesteps the classic footgun when
+    the same function is later called from non-CLI Python code, (b)
+    communicates read-only intent, and (c) doesn't trip `ruff B006` /
+    `flake8-bugbear`. Use `list[T] = []` only when the body really needs to
+    mutate the collection.
+
+## Enums
+Both Python `Enum` classes and protobuf `*_pb2.py` enums are auto-detected:
+  - Python: any class inheriting from `Enum` in scanned files.
+  - Protobuf: enum values parsed from `_pb2.py` files.
+
+The values populate argparse `choices=`. At invoke time, the string CLI value is
+converted to the actual enum member by `getattr(EnumClass, value)`.
+
+The type annotation must literally contain the enum class name (e.g. `Exchange`,
+`Exchange.V`, `list[Exchange.V]`). Aliased imports are NOT resolved.
+
+Enum defaults written in qualified form (`color: Color = Color.RED`) are
+handled correctly — the `Color.` prefix is stripped before the member lookup,
+so invoking the command with no flag produces the enum member, not a str.
+
+## Dict parameters (`dict[K, V]`)
+    @cli
+    def run(tags: dict[str, int] = {}):
+        print(tags)
+
+Invoke with one flag and whitespace-separated KEY=VALUE pairs:
+    mytool run --tags alpha=1 beta=2 gamma=3
+    → {'alpha': 1, 'beta': 2, 'gamma': 3}
+
+Or repeat the flag — entries accumulate:
+    mytool run --tags alpha=1 --tags beta=2
+
+Key and value types come from the annotation (`str`, `int`, `float`, `bool`,
+`Path`, `pathlib.Path`). Unknown types fall back to `str`. The first `=` per
+pair splits — the rest is the value, so `url=https://x.com/?q=1` works.
+Missing `=` produces `argument --tags: expected KEY=VALUE, got '…'`.
+
+Note: `bool` as a value type is a footgun (`bool("False") == True`); prefer
+str/int/float/Path for dict values.
+
+## Pydantic `BaseModel` parameters
+Annotating a parameter with a `BaseModel` subclass expands each field into
+its own CLI flag:
+
+    from pydantic import BaseModel
+    from cliche import cli
+
+    class Config(BaseModel):
+        host: str
+        port: int = 8080
+        tls: bool = False
+
+    @cli
+    def serve(cfg: Config):
+        print(cfg.model_dump())
+
+Invocation:
+    mytool serve --host acme.local --port 9000 --tls   # all fields
+    mytool serve --host acme.local                     # port+tls defaulted
+
+Required fields (no default) become required flags; pydantic runs full
+validation when the model is constructed, so bad types produce a clear
+`error: failed to construct Config for --cfg: …` and exit code 2.
+
+The type annotation must name the class directly (`cfg: Config` or
+`cfg: Config | None = None`); aliased imports aren't resolved.
+
+## Custom type callables
+If you annotate a parameter with a callable (function or class) defined in
+the same module, `cliche` passes it to argparse as `type=`. argparse
+invokes the callable on each token and wraps any `ValueError` /
+`argparse.ArgumentTypeError` into a clean `argument <name>: <msg>` error
+BEFORE your function runs.
+
+    import argparse
+    from cliche import cli
+
+    def Port(s: str) -> int:
+        n = int(s)
+        if not (1 <= n <= 65535):
+            raise argparse.ArgumentTypeError(f"port out of range: {n}")
+        return n
+
+    def NonEmpty(s: str) -> str:
+        if not s:
+            raise ValueError("must be non-empty")
+        return s
+
+    @cli
+    def serve(port: Port, host: NonEmpty = "localhost"):
+        print(f"{host}:{port}")
+
+    # mytool serve 70000         → argument port: port out of range: 70000
+    # mytool serve 80 --host ""  → argument --host: invalid NonEmpty value: ''
+
+This is the escape hatch for single-field validation that primitives can't
+express (range checks, URL parsing, semver parsing, etc.). Reach for a
+pydantic `BaseModel` when you need a cluster of related fields or
+cross-field constraints.
+
+The callable must be a simple identifier in the same module — parameterised
+forms (`list[Port]`, `Port | None`) don't trigger this path. Enum classes
+and pydantic `BaseModel` subclasses are intentionally skipped here since
+they have their own dedicated handling with richer semantics.
+
+Note: writing a callable where a type is expected makes mypy / pyright
+unhappy (`Variable 'Port' is not valid as a type`). Runtime is unaffected;
+if you lint strictly, ignore that specific line or use a pydantic model.
+
+## Docstrings
+The first line of the docstring becomes the command help summary. `:param name:
+description` lines are parsed into per-argument help text.
+
+    @cli
+    def deploy(env: str, dry_run: bool = False):
+        '''Deploy the service.
+
+        :param env: target environment (prod/stage)
+        :param dry_run: skip actual deploy
+        '''
+
+## Built-in global flags (always available)
+    -h, --help        Standard help
+    --cli             Show CLI + Python version info
+    --llm-help             Print compact LLM-friendly help (all commands + enums)
+    --pdb             Drop into (i)pdb post-mortem on exception
+    --pip [args]      Run pip from the CLI's Python env (e.g. `mytool --pip list`)
+    --pyspy N         Profile for N seconds, write speedscope JSON
+    --timing          Print detailed startup / parse timings to stderr
+    --skip-gen        Skip cache regeneration this invocation
+
+Note: `mytool --llm-help` is the canonical way an LLM can discover every command,
+signature, default, and enum. Prefer it over `--help` for machine consumption.
+
+## Layout rules
+  - Flat layout:   `my_project/foo.py` + `my_project/__init__.py`  →  package = dir name.
+  - Subdir layout: `my_project/mypkg/__init__.py`                  →  package = `mypkg`.
+  - src layout:    `my_project/src/mypkg/__init__.py`              →  package = `mypkg`.
+
+Every `.py` file under the package is scanned (recursively). Skipped: `.git`,
+`__pycache__`, `venv`, `.venv`, `env`, `.env`, `node_modules`, any dir starting
+with `.`. Cliche writes no code into your package — the entry point routes
+through a cliche-owned launcher.
+
+## Caching
+Cache lives at `$XDG_CACHE_HOME/cliche/<pkg>_<hash>.json` (default
+`~/.cache/cliche/`). Per-file mtime check; full AST reparse only on changed
+files; parallel parse when >4 files change.
+
+To force a clean rebuild, delete the cache file or touch the source files.
+
+## Common gotchas (bite-order)
+  1. Forgetting `from cliche import cli` — the import isn't strictly required
+     for detection (AST-based) but IS required at runtime so Python doesn't
+     NameError on the decorator.
+  2. Using `@cli()` with no args — this is treated as `@cli()` call form; works,
+     but prefer bare `@cli` for ungrouped functions.
+  3. A bool param with default `True` becomes `--no-NAME`, not `--NAME`. There is
+     no way to "set it to True" on the CLI because it's already the default.
+  4. List/tuple positionals consume the REST of argv (nargs='+'/'*'), so put them
+     last in the signature.
+  5. Pick ONE: `return` OR `print(...)`, never both. A non-None return value
+     is auto-printed as JSON — if you also call `print(...)`, the user sees
+     the output twice. For simple CLI functions, just `return` the result.
+  6. Functions named with reserved CLI words (e.g. `help`) will shadow `--help`
+     handling. Pick another name or wrap in `@cli("group")`.
+  7. `self`-methods: cliche instantiates the owning class with zero args. If
+     `__init__` requires args, it will fail — use plain functions instead.
+  8. Editable install (`pip install -e .`) is the default. If you move the
+     project directory, reinstall to update the entry-point path.
+  9. After renaming/removing a function, run the CLI once to refresh the cache
+     (or delete the cache file).
+
+## End-to-end example
+    # my_tool/commands.py
+    from cliche import cli
+    from enum import Enum
+
+    class Mode(Enum):
+        FAST = "fast"
+        SAFE = "safe"
+
+    @cli
+    def greet(name: str, shout: bool = False):
+        '''Greet the user.
+
+        :param name: who to greet
+        :param shout: uppercase the output
+        '''
+        msg = f"hello {name}"
+        print(msg.upper() if shout else msg)
+
+    @cli("db")
+    async def migrate(mode: Mode = Mode.SAFE, steps: int = 1):
+        '''Run DB migrations.'''
+        return {"ran": steps, "mode": mode.value}
+
+Then:
+    cliche install my_tool
+    my_tool greet Alice --shout
+    my_tool db migrate --mode FAST --steps 3
+    my_tool --llm-help         # discover everything
+
