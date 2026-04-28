@@ -2424,18 +2424,34 @@ def list_installed():
     for r in rows:
         r["shim"] = shim_kinds.get(r["binary"], "?")
 
+    # AUTOCOMP: yes/no per binary based on shell rc inspection. Same detection
+    # as `<binary> --cli` (via cliche.run._detect_autocomplete) so both
+    # surfaces stay in sync.
+    try:
+        from cliche.run import _detect_autocomplete
+    except ImportError:
+        _detect_autocomplete = lambda _b: False  # type: ignore[assignment]
+    autocomp_for: dict[str, bool] = {}
+    for bin_name in {r["binary"] for r in rows}:
+        autocomp_for[bin_name] = _detect_autocomplete(bin_name)
+    for r in rows:
+        r["autocomp"] = "yes" if autocomp_for.get(r["binary"]) else "no"
+
     # Column widths (raw text, no ANSI — we pad BEFORE colorising). SHIM sits
-    # between MODE and CMDS so a glance reads "{install style}, {fast path}".
-    headers = ("BINARY", "IMPORT", "VER", "MODE", "SHIM", "CMDS", "STATUS", "PATH")
+    # between MODE and CMDS so a glance reads "{install style}, {fast path}";
+    # AUTOCOMP follows CMDS so the per-binary "is the shell hooked up?" signal
+    # sits next to the runtime cache count.
+    headers = ("BINARY", "IMPORT", "VER", "MODE", "SHIM", "CMDS", "AUTOCOMP", "STATUS", "PATH")
     widths = {
-        "BINARY": max(len("BINARY"), max(len(r["binary"]) for r in rows)),
-        "IMPORT": max(len("IMPORT"), max(len(r["pkg"]) for r in rows)),
-        "VER":    max(len("VER"),    max(len(r["ver"]) for r in rows)),
-        "MODE":   max(len("MODE"),   max(len(r["_mode_display"]) for r in rows)),
-        "SHIM":   max(len("SHIM"),   max(len(r["shim"]) for r in rows)),
-        "CMDS":   max(len("CMDS"),   4),
-        "STATUS": max(len("STATUS"), max(len(r["status"]) for r in rows)),
-        "PATH":   max(len("PATH"),   max(len(r["path"]) for r in rows)),
+        "BINARY":   max(len("BINARY"),   max(len(r["binary"]) for r in rows)),
+        "IMPORT":   max(len("IMPORT"),   max(len(r["pkg"]) for r in rows)),
+        "VER":      max(len("VER"),      max(len(r["ver"]) for r in rows)),
+        "MODE":     max(len("MODE"),     max(len(r["_mode_display"]) for r in rows)),
+        "SHIM":     max(len("SHIM"),     max(len(r["shim"]) for r in rows)),
+        "CMDS":     max(len("CMDS"),     4),
+        "AUTOCOMP": max(len("AUTOCOMP"), max(len(r["autocomp"]) for r in rows)),
+        "STATUS":   max(len("STATUS"),   max(len(r["status"]) for r in rows)),
+        "PATH":     max(len("PATH"),     max(len(r["path"]) for r in rows)),
     }
 
     # Auto-fit to terminal width: if the total would overflow, shrink PATH only,
@@ -2444,7 +2460,7 @@ def list_installed():
     # keep their natural widths; we never squeeze BINARY/IMPORT/etc.
     term_width = shutil.get_terminal_size((120, 24)).columns
     # Per-cell overhead: " value " (2 spaces) + the leading '│'; plus one
-    # trailing '│' at the end. 7 cells → 7 bars + 7*2 padding + 1 trailing.
+    # trailing '│' at the end. N cells → N bars + N*2 padding + 1 trailing.
     overhead = len(headers) + len(headers) * 2 + 1
     non_path = sum(w for k, w in widths.items() if k != "PATH")
     available_for_path = term_width - overhead - non_path
@@ -2489,6 +2505,7 @@ def list_installed():
             f" {r['_mode_display']:<{widths['MODE']}} ",
             f" {r['shim']:<{widths['SHIM']}} ",
             f" {cmds:>{widths['CMDS']}} ",
+            f" {r['autocomp']:<{widths['AUTOCOMP']}} ",
             f" {colored_status(r['status'], widths['STATUS'])} ",
             f" {path:<{widths['PATH']}} ",
         ]
@@ -2783,6 +2800,12 @@ def main_cli():
         except ImportError:
             _v = "unknown"
         print(_v)
+        return
+    # Early --cli short-circuit: print env info for the cliche binary itself
+    # (mirrors the same flag on cliche-installed user CLIs).
+    if "--cli" in sys.argv[1:]:
+        from cliche.run import cli_info
+        cli_info(pkg_name="cliche")
         return
     parser.add_argument(
         "--llm-help",

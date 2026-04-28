@@ -130,60 +130,155 @@ def _resolve_pkg_version(pkg_name=None, install_dir=None):
     return None
 
 
+def _resolve_binary(pkg_name):
+    """Return (binary_name, binary_path) for the running CLI.
+
+    Falls back to the console_scripts entry point when sys.argv[0] is "-c" —
+    happens on the fast-shim's Python fallback path (`exec python -c "..."`),
+    where Python sets argv[0] to "-c" and older wrappers don't override it.
+    """
+    import os
+    argv0 = sys.argv[0] or ""
+    if argv0 and argv0 != "-c":
+        return os.path.basename(argv0), argv0
+    if pkg_name:
+        try:
+            from importlib.metadata import entry_points
+            import shutil
+            target = f"cliche.launcher:launch_{pkg_name}"
+            best = None
+            for ep in entry_points(group="console_scripts"):
+                if ep.value == target:
+                    best = ep.name
+                    break
+                # Fallback: any entry point whose module belongs to pkg_name.
+                # Catches cliche itself (`cliche.install:main_cli`) and any
+                # legacy non-launcher entry points.
+                module = (ep.value or "").split(":", 1)[0]
+                if module == pkg_name or module.startswith(pkg_name + "."):
+                    if best is None or ep.name == pkg_name:
+                        best = ep.name
+            if best:
+                return best, shutil.which(best) or ""
+        except Exception:
+            pass
+    return os.path.basename(argv0) or "", argv0
+
+
+def _detect_autocomplete(binary_name) -> bool:
+    """True when a `register-python-argcomplete <binary_name>` line lives in
+    any of the user's shell rc files. Shared by `--cli` and `cliche ls`."""
+    if not binary_name:
+        return False
+    import os
+    needle_bash = f"register-python-argcomplete {binary_name}"
+    needle_fish = f"register-python-argcomplete --shell fish {binary_name}"
+    for config in ("~/.bashrc", "~/.zshrc", "~/.bash_profile", "~/.zprofile",
+                   "~/.config/fish/config.fish"):
+        try:
+            with open(os.path.expanduser(config)) as f:
+                content = f.read()
+            if needle_bash in content or needle_fish in content:
+                return True
+        except (FileNotFoundError, IOError, OSError):
+            pass
+    return False
+
+
+def _detect_install_source(pkg_name):
+    """Return a short string describing how the package was installed
+    (e.g. 'pip', 'pip, editable', 'pip, wheel'). None when unknown."""
+    if not pkg_name:
+        return None
+    try:
+        from importlib.metadata import distribution, PackageNotFoundError
+    except Exception:
+        return None
+    try:
+        dist = distribution(pkg_name)
+    except PackageNotFoundError:
+        return None
+    except Exception:
+        return None
+    installer = (dist.read_text("INSTALLER") or "").strip() or None
+    editable = False
+    try:
+        raw = dist.read_text("direct_url.json")
+        if raw:
+            d = json.loads(raw)
+            editable = bool(d.get("dir_info", {}).get("editable"))
+    except Exception:
+        pass
+    wheel = False
+    try:
+        wheel = dist.read_text("WHEEL") is not None
+    except Exception:
+        pass
+    bits = []
+    if installer:
+        bits.append(installer)
+    if editable:
+        bits.append("editable")
+    elif wheel:
+        bits.append("wheel")
+    return ", ".join(bits) if bits else None
+
+
 def _collect_cli_info(cache_path=None, pkg_name=None, install_dir=None) -> list:
     """Return [(label, value), ...] describing the CLI + Python environment.
 
     Shared by --cli (human-readable dump) and --llm-help (commented header above
-    the spec), so both surfaces stay in sync.
+    the spec), so both surfaces stay in sync. Order goes package-specific first
+    (most relevant to the user), cliche/Python info last (supporting context).
     """
     import os
     sv = sys.version_info
     python_version = f"{sv.major}.{sv.minor}.{sv.micro}"
 
+    binary_name, binary_path = _resolve_binary(pkg_name)
+
     installed = False
     cli_dir = None
+    shim = None
     try:
-        with open(sys.argv[0]) as f:
+        with open(binary_path) as f:
             txt = f.read()
-            installed = "cliche" in txt.lower() or "cli tool installed" in txt.lower()
-            match = re.search(r'file_path = "([^"]+)"', txt)
-            if match:
-                cli_dir = match.group(1)
-    except (FileNotFoundError, IOError):
+        installed = "cliche" in txt.lower() or "cli tool installed" in txt.lower()
+        match = re.search(r'file_path = "([^"]+)"', txt)
+        if match:
+            cli_dir = match.group(1)
+        if "cliche fast-shim wrapper" in txt:
+            shim = "c"
+        elif "from cliche.launcher import launch_" in txt or "cliche" in txt.lower():
+            shim = "py"
+    except (FileNotFoundError, IOError, IsADirectoryError, OSError):
         pass
 
-    autocomplete = False
-    name = os.path.basename(sys.argv[0])
-    shell_configs = ["~/.bashrc", "~/.zshrc", "~/.bash_profile", "~/.zprofile"]
-    for config in shell_configs:
-        try:
-            with open(os.path.expanduser(config)) as f:
-                if f"register-python-argcomplete {name}" in f.read():
-                    autocomplete = True
-                    break
-        except FileNotFoundError:
-            pass
+    install_source = _detect_install_source(pkg_name)
+    autocomplete = _detect_autocomplete(binary_name)
 
     python_dir = os.path.dirname(sys.executable)
-    cache_display = cache_path or f"{sys.argv[0]}.json"
-
     pkg_version = _resolve_pkg_version(pkg_name, install_dir or cli_dir)
 
-    info = [
-        ("Executable", name),
-        ("Executable path", sys.argv[0]),
-        ("Cache path", str(cache_display)),
-        ("Cliche version", _cliche_version()),
-        ("Installed by cliche", str(installed)),
-    ]
+    info = []
     if pkg_name:
         info.append(("Package name", pkg_name))
     if pkg_version:
         info.append(("Package version", pkg_version))
+    if install_source:
+        info.append(("Install source", install_source))
+    info.append(("Executable", binary_name or "(unknown)"))
+    info.append(("Executable path", binary_path or "(unknown)"))
     if cli_dir:
         info.append(("CLI directory", cli_dir))
+    if cache_path:
+        info.append(("Cache path", str(cache_path)))
+    info.append(("Installed by cliche", str(installed)))
+    if shim:
+        info.append(("Shim", shim))
+    info.append(("Autocomplete enabled", str(autocomplete)))
     info.extend([
-        ("Autocomplete enabled", str(autocomplete)),
+        ("Cliche version", _cliche_version()),
         ("Python Version", python_version),
         ("Python Interpreter", sys.executable),
         ("Python pip", f"{python_dir}/pip"),
@@ -1766,8 +1861,14 @@ def main():
     import time
     t0 = time.time()
 
-    # Get program name for usage messages
+    # Get program name for usage messages. argv[0] is "-c" on the fast-shim's
+    # Python fallback path (`exec python -c "..."`); fall back to the
+    # entry-point binary name so help text reads "1one ..." not "-c ...".
     prog_name = os.path.basename(sys.argv[0])
+    if prog_name == "-c":
+        resolved, _ = _resolve_binary(PKG_NAME)
+        if resolved:
+            prog_name = resolved
 
     # Handle --version early: print just the user package's version (or the
     # cliche version as a last resort) and exit. Intentionally terse —
