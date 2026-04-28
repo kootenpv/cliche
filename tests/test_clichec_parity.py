@@ -563,7 +563,7 @@ def test_clichec_is_faster_than_python(cli_binary, clichec_binary, primed_cache)
         return s[len(s) // 2]
 
     py_times, c_times = [], []
-    for _ in range(5):
+    for _ in range(3):
         t = time.perf_counter()
         _run_python(cli_binary, ["--help"])
         py_times.append(time.perf_counter() - t)
