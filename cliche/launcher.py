@@ -66,9 +66,71 @@ def _clean_sys_path() -> None:
     sys.path[:] = cleaned
 
 
+def _maybe_self_upgrade_shim(pkg: str) -> None:
+    """If we got here via pip's stock Python shim, rewrite the shim in place
+    so subsequent invocations skip Python startup and go through clichec.
+
+    This is the auto-apply path for `pip install`: pip writes a plain Python
+    console script, the user runs the binary once (paying ~50 ms Python
+    startup), and on the way through this function we replace the script
+    with the fast-shim shell wrapper. Every later invocation hits clichec
+    directly (~3 ms on cache hits, falling back to Python on anything it
+    doesn't service).
+
+    Idempotent + silent on every failure mode:
+      - already a fast-shim → no-op (single read of argv[0]'s first 512 B)
+      - bin/ not writable, no compiler, package not findable → no-op
+      - editable-install moved → wrapper points at wrong cache dir, but
+        clichec returns 64 (cache miss) and the wrapper falls through to
+        Python, which re-runs this function and re-applies with the new
+        cache hash. Self-healing.
+
+    Tradeoff: first run after a `pip install` (or any pip-induced shim
+    overwrite) still pays Python startup. Cost is paid once per overwrite,
+    not per invocation.
+    """
+    import os
+    import sys
+    try:
+        path = sys.argv[0]
+        if not path or not os.path.isfile(path) or not os.access(path, os.W_OK):
+            return
+        with open(path, 'rb') as f:
+            head = f.read(512)
+        if b"cliche fast-shim wrapper" in head:
+            return  # already a fast-shim
+        # Pip-generated console script begins with a Python shebang. If it's
+        # something else (user-edited, custom script), don't touch it.
+        if not head.startswith(b"#!") or b"python" not in head[:200]:
+            return
+        from cliche._clichec import ensure_built, install_fast_shim
+        if ensure_built(verbose=False) is None:
+            return  # no C compiler — stay on the Python shim forever
+        import importlib.util
+        spec = importlib.util.find_spec(pkg)
+        if not spec:
+            return
+        from pathlib import Path
+        if spec.origin and spec.origin != "namespace":
+            pkg_dir = str(Path(spec.origin).parent)
+        elif spec.submodule_search_locations:
+            pkg_dir = str(list(spec.submodule_search_locations)[0])
+        else:
+            return
+        install_fast_shim(os.path.basename(path), pkg, pkg_dir)
+    except Exception:
+        # Never let the upgrade fail the user's invocation.
+        pass
+
+
 def _make_launcher(pkg: str):
     def _launch():
         _clean_sys_path()
+        # Auto-upgrade pip's stock Python shim to the fast-shim wrapper on the
+        # way through. Cheap when we're already a fast-shim (single 512 B
+        # read), and once succeeded the function isn't entered again — the
+        # next invocation goes straight to clichec.
+        _maybe_self_upgrade_shim(pkg)
         # Self-alias: `cliche install sdm -p cliche` registers `sdm` as an
         # alternate binary name for cliche itself. Scanning cliche's package
         # for `@cli` decorators would find none (cliche's real entry is the

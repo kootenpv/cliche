@@ -231,8 +231,22 @@ def _scan_and_cache(pkg_dir: Path, cache_file: Path, package_name: str = "", sho
     try:
         with open(cache_file) as f:
             cache = json.load(f)
+        # Cache shape bump invalidates older caches in-place: anything missing
+        # the v2.2 cliche_version stamp is rewritten from scratch so the C
+        # fast-fail launcher (clichec) can trust the schema it sees.
+        if cache.get("version") != "2.2":
+            cache = {"version": "2.2", "files": {}, "enums": {}, "py_mtimes": {}}
     except (FileNotFoundError, json.JSONDecodeError):
-        cache = {"version": "2.1", "files": {}, "enums": {}, "py_mtimes": {}}
+        cache = {"version": "2.2", "files": {}, "enums": {}, "py_mtimes": {}}
+
+    # Stamp the cliche version that wrote this cache. clichec refuses to act on
+    # a cache written by a different cliche version, falling back to Python so
+    # any new cache fields land in front of an interpreter that knows them.
+    try:
+        from cliche import __version__ as _cv
+    except ImportError:
+        _cv = "unknown"
+    cache["cliche_version"] = _cv
 
     if show_timing:
         print(f"cache_load: {(time.time() - t0)*1000:.1f}ms", file=sys.stderr)

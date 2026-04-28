@@ -49,3 +49,17 @@ cliche = "cliche.install:main_cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["cliche"]
+
+# Ship the C source for the fast-fail launcher (clichec). It is compiled on
+# demand by `cliche compile-launcher` / `cliche fast-shim` — no wheel-level C
+# extension build, so the wheel stays pure-Python and platform-independent.
+[tool.hatch.build.targets.wheel.force-include]
+"cliche/clichec.c" = "cliche/clichec.c"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "cliche",
+    "tests",
+    "README.md",
+    "pyproject.toml",
+]

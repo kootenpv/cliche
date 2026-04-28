@@ -2131,7 +2131,66 @@ def main():
             return
 
     print(f"Unknown command: {cmd}", file=sys.stderr)
+    suggestion = _suggest_command(cmd, commands, subcommands, prog_name)
+    if suggestion:
+        print(f"Did you mean: {suggestion}?", file=sys.stderr)
     sys.exit(1)
+
+
+def _levenshtein(a: str, b: str) -> int:
+    """Case-insensitive edit distance between two strings, capped at 32 chars.
+
+    Pure-stdlib port of clichec.c's `lev()` so the suggestion produced by
+    Python's unknown-command path matches the C path byte-for-byte. Both
+    sides MUST run the same algorithm with the same threshold or the
+    parity test (tests/test_clichec_parity.py) drifts.
+
+    The 32-char short-circuit matches the C version: anything longer is
+    almost certainly not a typo (commands are short identifiers), and we
+    skip the O(la*lb) DP rather than risk a stack overflow on a stray
+    paste of a long string.
+    """
+    la, lb = len(a), len(b)
+    if la > 32 or lb > 32:
+        return max(la, lb)
+    prev = list(range(lb + 1))
+    for i in range(1, la + 1):
+        curr = [i] + [0] * lb
+        ai = a[i - 1].lower()
+        for j in range(1, lb + 1):
+            cost = 0 if ai == b[j - 1].lower() else 1
+            curr[j] = min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+        prev = curr
+    return prev[lb]
+
+
+def _suggest_command(cmd: str, commands: dict, subcommands: dict,
+                     prog_name: str) -> str | None:
+    """Return `<prog> [group] <name>` if a close match exists, else None.
+
+    Threshold is `len(cmd) // 2 + 1` — same as clichec.c. Closer matches
+    win; ties go to the first encountered (Python's `min` is stable, so
+    iteration order = command-dict order = command-cache order).
+
+    Output is the full suggestion line minus the "Did you mean: " prefix
+    and trailing "?", so callers can wrap it however they want.
+    """
+    candidates: list[tuple[str, str | None]] = [(c, None) for c in commands]
+    for group, sub in subcommands.items():
+        for name in sub:
+            candidates.append((name, group))
+    if not candidates:
+        return None
+    threshold = len(cmd) // 2 + 1
+    best_dist, best_name, best_group = min(
+        ((_levenshtein(cmd, n), n, g) for n, g in candidates),
+        key=lambda t: t[0],
+    )
+    if best_dist > threshold:
+        return None
+    if best_group:
+        return f"{prog_name} {best_group} {best_name}"
+    return f"{prog_name} {best_name}"
 
 
 if __name__ == '__main__':
