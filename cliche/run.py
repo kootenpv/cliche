@@ -718,9 +718,9 @@ def print_llm_command_help(func: dict, prog_name: str, cmd: str, group: str = No
         print()
 
     print("## global options")
-    print("--pdb: debugger on error | --pip ARGS: pip for this env | --uv ARGS: uv for this env | --pyspy N: profile Ns")
-    print("--raw: plain output (no JSON/color) | --notraceback: terse errors")
-    print("--timing: timing info | --skip-gen: skip cache regen | --version: package version | --cli: version info | --llm-help: this view")
+    print("--pdb: debugger on error | --pyspy N: profile Ns | --raw: plain output (no JSON/color)")
+    print("--notraceback: terse errors | --timing: timing info | --llm-help: this view")
+    print(f"# Top-level only (run on `{prog_name}` itself): --version, --cli, --pip, --uv, --skip-gen — see `{prog_name} --llm-help`")
 
 
 
@@ -1217,13 +1217,13 @@ def build_parser_for_function(func, enums=None, prog_name: str = "run.py", help_
         add_help=False,
     )
 
-    # Add global CLI flags
+    # Add global CLI flags. Per-command help intentionally omits flags that
+    # only make sense at the top level (--version, --cli, --pip, --uv,
+    # --skip-gen) — those are listed by `<prog> --help` / `<prog> --llm-help`.
     global_group = parser.add_argument_group('CLICHE OPTIONS')
     global_group.add_argument('-h', '--help', action='help', help='Show this help message')
-    global_group.add_argument('--cli', action='store_true', help='Show CLI and Python version info')
+    global_group.add_argument('--llm-help', action='store_true', help="Show this command's compact LLM-friendly help")
     global_group.add_argument('--pdb', action='store_true', help='Drop into debugger on error')
-    global_group.add_argument('--pip', action='store_true', help="Run pip for this CLI's Python environment")
-    global_group.add_argument('--uv', action='store_true', help="Run uv targeting this CLI's Python environment")
     global_group.add_argument('--pyspy', type=int, default=0, metavar='N', help='Profile for N seconds with py-spy (speedscope format)')
     global_group.add_argument('--raw', action='store_true', help='Print return value as-is (no JSON pretty-print, no color) — good for pipes')
     global_group.add_argument('--notraceback', action='store_true', help='On error, print only ExcName: message (no traceback)')
@@ -1597,7 +1597,7 @@ def invoke_function(func, parsed_args, enums=None, pydantic_binds=None):
         fn = getattr(module, func_name)
 
     # Global CLI args to exclude from function call
-    global_args = {'cli', 'pdb', 'pip', 'uv', 'pyspy', 'raw', 'notraceback', 'timing'}
+    global_args = {'cli', 'pdb', 'pip', 'uv', 'pyspy', 'raw', 'notraceback', 'timing', 'version', 'llm_help', 'skip_gen'}
 
     # Convert parsed args to dict, excluding None values and global CLI args
     kwargs = {k: v for k, v in vars(parsed_args).items() if v is not None and k not in global_args}
