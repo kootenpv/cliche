@@ -497,37 +497,70 @@ static void build_index(const jv *cache, CmdList *out, Arena *a) {
  *                   freshness check
  * ============================================================ */
 
-/* Freshness gate: every .py file the cache knows about must still exist with
- * the same mtime. We do NOT check dir_mtimes — runtime.py's incremental scan
- * skips rewriting the cache when dir mtimes drift but no file content changed
- * (an intentional perf optimization), so a strict dir-mtime equality check
- * here would defer in the steady state. The (small) tradeoff: if the user
- * adds a brand-new @cli .py file between Python invocations, clichec will
- * happily serve a cache that doesn't know about it until the next time the
- * Python path runs. That's acceptable for the fast-fail surface (help,
- * llm-help, unknown-command) — actual dispatch always falls through to
- * Python, which will rescan and pick the new file up.
+/* Freshness gate: every .py file *and* directory the cache knows about must
+ * still exist with the same mtime. py_mtimes catches edits + deletions of
+ * tracked files; dir_mtimes catches additions and deletions of untracked
+ * files (a new @cli .py landing in an existing dir, a fresh subpackage
+ * appearing). runtime.py keeps dir_mtimes in sync on every drift (see the
+ * `dirs_drifted` rewrite condition) so a strict equality check here is safe.
  *
- * File deletions are still caught: stat() fails on the missing path → defer.
- * File content changes are still caught: mtime mismatch → defer. */
+ * Without the dir-mtime check clichec would happily serve "Unknown command"
+ * for functions defined in brand-new files, since those files are absent from
+ * py_mtimes and the wrapper doesn't fall through on rc=1. */
 static int cache_is_fresh(const jv *cache, const char *pkg_dir) {
     if (!pkg_dir) return 0;
     const jv *fms = jv_obj_get(cache, "py_mtimes");
     if (!fms || fms->kind != JV_OBJ) return 0;
     char buf[4096];
-    if (fms && fms->kind == JV_OBJ) {
-        for (size_t i = 0; i < fms->u.obj.n; i++) {
-            const char *rel = fms->u.obj.keys[i];
-            size_t      rl  = fms->u.obj.klens[i];
-            const jv   *mv  = &fms->u.obj.vals[i];
+    for (size_t i = 0; i < fms->u.obj.n; i++) {
+        const char *rel = fms->u.obj.keys[i];
+        size_t      rl  = fms->u.obj.klens[i];
+        const jv   *mv  = &fms->u.obj.vals[i];
+        if (mv->kind != JV_NUM) return 0;
+        int n = snprintf(buf, sizeof(buf), "%s/%.*s", pkg_dir,
+                         (int)rl, rel);
+        if (n < 0 || (size_t)n >= sizeof(buf)) return 0;
+        struct stat st;
+        if (stat(buf, &st) != 0) {
+            if (getenv("CLICHEC_DEBUG"))
+                fprintf(stderr, "clichec: stat failed for file %s\n", buf);
+            return 0;
+        }
+        double cur = (double)st.st_mtim.tv_sec + st.st_mtim.tv_nsec / 1e9;
+        double want = mv->u.n;
+        double diff = cur - want;
+        if (diff < 0) diff = -diff;
+        if (diff > 0.001) {
+            if (getenv("CLICHEC_DEBUG"))
+                fprintf(stderr, "clichec: file mtime drift %s: cur=%.6f want=%.6f\n",
+                        buf, cur, want);
+            return 0;
+        }
+    }
+
+    /* Tracked directories — keys are relative paths ("." for the package
+     * root, "sub" for a subpackage, etc.). A drift here indicates a file
+     * has been added/removed in that dir, so the cache may not know about
+     * a brand-new @cli function. Defer to Python so it can rescan. */
+    const jv *dms = jv_obj_get(cache, "dir_mtimes");
+    if (dms && dms->kind == JV_OBJ) {
+        for (size_t i = 0; i < dms->u.obj.n; i++) {
+            const char *rel = dms->u.obj.keys[i];
+            size_t      rl  = dms->u.obj.klens[i];
+            const jv   *mv  = &dms->u.obj.vals[i];
             if (mv->kind != JV_NUM) return 0;
-            int n = snprintf(buf, sizeof(buf), "%s/%.*s", pkg_dir,
+            int n;
+            if (rl == 1 && rel[0] == '.') {
+                n = snprintf(buf, sizeof(buf), "%s", pkg_dir);
+            } else {
+                n = snprintf(buf, sizeof(buf), "%s/%.*s", pkg_dir,
                              (int)rl, rel);
+            }
             if (n < 0 || (size_t)n >= sizeof(buf)) return 0;
             struct stat st;
             if (stat(buf, &st) != 0) {
                 if (getenv("CLICHEC_DEBUG"))
-                    fprintf(stderr, "clichec: stat failed for file %s\n", buf);
+                    fprintf(stderr, "clichec: stat failed for dir %s\n", buf);
                 return 0;
             }
             double cur = (double)st.st_mtim.tv_sec + st.st_mtim.tv_nsec / 1e9;
@@ -536,7 +569,7 @@ static int cache_is_fresh(const jv *cache, const char *pkg_dir) {
             if (diff < 0) diff = -diff;
             if (diff > 0.001) {
                 if (getenv("CLICHEC_DEBUG"))
-                    fprintf(stderr, "clichec: file mtime drift %s: cur=%.6f want=%.6f\n",
+                    fprintf(stderr, "clichec: dir mtime drift %s: cur=%.6f want=%.6f\n",
                             buf, cur, want);
                 return 0;
             }

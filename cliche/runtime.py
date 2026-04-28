@@ -452,7 +452,14 @@ def _scan_and_cache(pkg_dir: Path, cache_file: Path, package_name: str = "", sho
     # Atomic: write to a sibling temp file and os.replace() it onto the target
     # so a kill or power-loss mid-write can't leave a truncated JSON behind.
     dirs_newly_tracked = not old_dir_mtimes and bool(current_dir_mtimes)
-    if changed_files or deleted_files or new_py_files or pb2_changed or dirs_newly_tracked:
+    # Also rewrite when dir mtimes drifted but no file content changed: the
+    # C dispatcher (clichec) checks dir mtimes to detect freshly-added .py
+    # files it doesn't yet know about, so cache.dir_mtimes must track the
+    # filesystem accurately — otherwise clichec serves "Unknown command" on
+    # commands defined in newly-added files instead of deferring to Python.
+    dirs_drifted = (not fast_path) and current_dir_mtimes != old_dir_mtimes
+    if (changed_files or deleted_files or new_py_files or pb2_changed
+            or dirs_newly_tracked or dirs_drifted):
         cache_file_path = Path(cache_file)
         tmp_path = cache_file_path.with_suffix(cache_file_path.suffix + f".tmp.{os.getpid()}")
         try:
