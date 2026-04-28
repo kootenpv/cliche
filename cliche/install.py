@@ -194,6 +194,59 @@ def _cliche_entry_target(package_name: str) -> str:
     return f"cliche.launcher:launch_{package_name}"
 
 
+def _print_no_compiler_hint() -> None:
+    """Print a single, platform-tailored hint about installing a C compiler
+    so the next `cliche install` can wire up the fast-launch path.
+
+    Fired ONLY from the auto-apply branch in `install()` — never from
+    cliche.launcher's per-invocation self-upgrade path, which would nag on
+    every slow-path run. The Python shim still works without a compiler;
+    this is purely a "you're missing out on ~25× speedup" nudge.
+
+    Output goes to stderr so a CI system that captures stdout for
+    "cliche install <name>" output doesn't inflate logs with the hint, and
+    so it visually clusters with the surrounding "Installed" / "Fast-launch
+    active" lines on a regular terminal (both stdout and stderr go to the
+    user there).
+    """
+    if sys.platform == "darwin":
+        cmd = "xcode-select --install"
+        platform_hint = f"  on macOS:  {cmd}"
+    elif sys.platform.startswith("linux"):
+        platform_hint = (
+            "  on Debian/Ubuntu:  sudo apt install gcc\n"
+            "  on Fedora/RHEL:    sudo dnf install gcc\n"
+            "  on Arch:           sudo pacman -S gcc\n"
+            "  on Alpine:         sudo apk add build-base"
+        )
+    else:
+        # Windows / BSD / etc — just say "install gcc or clang" and trust
+        # the user to know their package manager.
+        platform_hint = "  install gcc or clang via your platform's package manager"
+    # The "one-time hint" line sits next to the platform-specific commands so
+    # the user reads "here's how to fix it" and "btw this isn't going to keep
+    # nagging you" together. Re-fires only on the next `cliche install` —
+    # never on per-binary invocations (cliche.launcher stays silent).
+    body = (
+        "note: no C compiler found — install one to enable the fast-launch path\n"
+        "      (~25× faster startup on --help / completion / unknown-cmd).\n"
+        f"{platform_hint}\n"
+        "  (one-time hint — shown at `cliche install` only, not on every invocation)\n"
+        "Re-run `cliche install <name>` once the compiler is on PATH; the "
+        "Python shim keeps working in the meantime."
+    )
+    # Yellow advisory styling, matching the MASKED row colour in `cliche ls`
+    # (STATUS_COLOR["MASKED"] = "33"). Honours the same NO_COLOR / FORCE_COLOR
+    # / non-TTY rules as the rest of cliche so piped install logs stay clean.
+    use_color = (
+        sys.stderr.isatty()
+        and not os.environ.get("NO_COLOR")
+    ) or os.environ.get("FORCE_COLOR")
+    if use_color:
+        body = f"\x1b[33m{body}\x1b[0m"
+    print(f"\n{body}", file=sys.stderr)
+
+
 def _parse_cliche_entry(value: str) -> str | None:
     """Return the package name if `value` is a cliche-managed entry target.
 
@@ -1270,11 +1323,12 @@ def install(name: str, module_dir: str = None, no_pip: bool = False,
         print(f"Installed as an isolated uv tool. Binary is on PATH via ~/.local/bin/{name}.")
         print(f"Manage via: uv tool {{list,upgrade,uninstall}}  (or `cliche uninstall {name}`).")
 
-    # Auto-apply the fast-shim wrapper (clichec-backed). Skipped silently
-    # when no C compiler is present; tool installs are also skipped because
-    # the binary lives in an isolated venv whose package layout this
-    # interpreter can't `find_spec` into. Failures are non-fatal — the
-    # binary keeps working as a plain Python shim.
+    # Auto-apply the fast-shim wrapper (clichec-backed). Skipped when no C
+    # compiler is present (with a one-time hint on how to get one — see
+    # _print_no_compiler_hint); tool installs are also skipped because the
+    # binary lives in an isolated venv whose package layout this interpreter
+    # can't `find_spec` into. Failures are non-fatal — the binary keeps
+    # working as a plain Python shim.
     if not no_pip and not tool:
         try:
             from cliche._clichec import install_fast_shim, ensure_built
@@ -1282,6 +1336,8 @@ def install(name: str, module_dir: str = None, no_pip: bool = False,
                 ok, _msg = install_fast_shim(name, package_name, str(pkg_dir))
                 if ok:
                     print("Fast-launch active (clichec) — help/completion served from C.")
+            else:
+                _print_no_compiler_hint()
         except Exception:
             pass  # never break a working install on the optional fast path
 
