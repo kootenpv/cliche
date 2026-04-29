@@ -683,7 +683,7 @@ def _print_llm_output_json(commands: dict, subcommands: dict, enums: dict,
         '--uv [args]': "Run uv targeting this CLI's Python environment (e.g. --uv pip install pkg, --uv sync)",
         '--pyspy N': 'Profile for N seconds with py-spy (speedscope JSON output)',
         '--raw': 'Print return value as-is (no JSON, no color) — good for pipes',
-        '--notraceback': 'On error, print only ExcName: message (no traceback)',
+        '--full-traceback': 'Show the full traceback including cliche-internal wrapper frames',
         '--timing': 'Show timing information',
         '--skip-gen': 'Skip cache regeneration',
     }
@@ -753,7 +753,7 @@ def _print_llm_output_lines(commands: dict, subcommands: dict, enums: dict,
     lines.append("--uv [args]: Run uv targeting this CLI's Python env (e.g. --uv pip install pkg, --uv sync)")
     lines.append("--pyspy N: Profile for N seconds with py-spy (speedscope JSON output)")
     lines.append("--raw: Print return value as-is (no JSON, no color) — good for pipes")
-    lines.append("--notraceback: On error, print only ExcName: message (no traceback)")
+    lines.append("--full-traceback: Show the full traceback including cliche-internal wrapper frames")
     lines.append("--timing: Show timing information")
     lines.append("--skip-gen: Skip cache regeneration")
     lines.append("")
@@ -827,7 +827,7 @@ def print_llm_command_help(func: dict, prog_name: str, cmd: str, group: str = No
 
     print("## global options")
     print("--pdb: debugger on error | --pyspy N: profile Ns | --raw: plain output (no JSON/color)")
-    print("--notraceback: terse errors | --timing: timing info | --llm-help: this view")
+    print("--full-traceback: include cliche wrappers | --timing: timing info | --llm-help: this view")
     print(f"# Top-level only (run on `{prog_name}` itself): --version, --cli, --pip, --uv, --skip-gen — see `{prog_name} --llm-help`")
 
 
@@ -861,7 +861,7 @@ def print_help(commands, subcommands, prog_name: str = "run.py"):
     print(f"  {Colors.blue('--uv')}          Run uv targeting this CLI's Python environment")
     print(f"  {Colors.blue('--pyspy N')}     Profile for N seconds with py-spy (speedscope format)")
     print(f"  {Colors.blue('--raw')}         Print return value as-is (no JSON, no color)")
-    print(f"  {Colors.blue('--notraceback')} On error, print only ExcName: message")
+    print(f"  {Colors.blue('--full-traceback')} Show the full traceback including cliche wrapper frames")
     print(f"  {Colors.blue('--skip-gen')}    Skip cache regeneration")
     print(f"  {Colors.blue('--timing')}      Show timing information")
 
@@ -1334,7 +1334,7 @@ def build_parser_for_function(func, enums=None, prog_name: str = "run.py", help_
     global_group.add_argument('--pdb', action='store_true', help='Drop into debugger on error')
     global_group.add_argument('--pyspy', type=int, default=0, metavar='N', help='Profile for N seconds with py-spy (speedscope format)')
     global_group.add_argument('--raw', action='store_true', help='Print return value as-is (no JSON pretty-print, no color) — good for pipes')
-    global_group.add_argument('--notraceback', action='store_true', help='On error, print only ExcName: message (no traceback)')
+    global_group.add_argument('--full-traceback', action='store_true', help='Show the full traceback including cliche-internal wrapper frames')
     global_group.add_argument('--timing', action='store_true', help='Show timing information')
 
     params = func.get('parameters', [])
@@ -1705,7 +1705,7 @@ def invoke_function(func, parsed_args, enums=None, pydantic_binds=None):
         fn = getattr(module, func_name)
 
     # Global CLI args to exclude from function call
-    global_args = {'cli', 'pdb', 'pip', 'uv', 'pyspy', 'raw', 'notraceback', 'timing', 'version', 'llm_help', 'skip_gen'}
+    global_args = {'cli', 'pdb', 'pip', 'uv', 'pyspy', 'raw', 'full_traceback', 'timing', 'version', 'llm_help', 'skip_gen'}
 
     # Convert parsed args to dict, excluding None values and global CLI args
     kwargs = {k: v for k, v in vars(parsed_args).items() if v is not None and k not in global_args}
@@ -1940,17 +1940,40 @@ def main():
         sys.argv.remove('--raw')
         RAW_MODE = True
 
-    # --notraceback: suppress the Python traceback on uncaught exceptions. Just
-    # print `ExcName: message` and exit 1. Useful for end-user CLIs where the
-    # traceback is noise. Plays well with --pdb (pdb sets its own excepthook
-    # later, which overrides this — that's the right precedence).
-    if '--notraceback' in sys.argv:
-        sys.argv.remove('--notraceback')
-        def _terse_excepthook(exc_type, exc_value, tb):
-            msg = f"{exc_type.__name__}: {exc_value}" if str(exc_value) else exc_type.__name__
-            print(msg, file=sys.stderr)
-            sys.exit(1)
-        sys.excepthook = _terse_excepthook
+    # Trim cliche-internal frames from uncaught tracebacks so the traceback
+    # opens at the user's code, but keep the very first frame (the `<string>`
+    # entry shim, which prints `from cliche.launcher import launch_<pkg>`) so
+    # it's still visible that cliche launched the process. Middle frames
+    # (launcher.py → runtime.py → run.py → invoke_function) are spliced out.
+    # If the crash itself is in cliche internals (no user-code frame is
+    # reached), keep the full tb so we don't hide the real failure.
+    # --full-traceback opts out (debugging cliche itself); --pdb sets its own
+    # excepthook later and takes precedence — both intended.
+    if '--full-traceback' in sys.argv:
+        sys.argv.remove('--full-traceback')
+    else:
+        import os as _os
+        _cliche_dir = _os.path.dirname(_os.path.abspath(__file__))
+        def _trimmed_excepthook(exc_type, exc_value, tb):
+            import traceback as _tb
+            cur = tb
+            while cur is not None:
+                fn = cur.tb_frame.f_code.co_filename
+                if fn != '<string>' and not fn.startswith(_cliche_dir):
+                    break
+                cur = cur.tb_next
+            if cur is None or cur is tb:
+                _tb.print_exception(exc_type, exc_value, tb)
+                return
+            # Keep the entry frame, mark dropped frames with "...", then resume
+            # at the first user-code frame.
+            out = sys.stderr
+            out.write("Traceback (most recent call last):\n")
+            out.writelines(_tb.format_list(_tb.extract_tb(tb, limit=1)))
+            out.write("  ...\n")
+            out.writelines(_tb.format_list(_tb.extract_tb(cur)))
+            out.writelines(_tb.format_exception_only(exc_type, exc_value))
+        sys.excepthook = _trimmed_excepthook
 
     # Set up pdb excepthook if --pdb is passed (must be before any imports that might fail).
     # Prefers ipdb (richer REPL) and falls back to stdlib pdb. Hint the user once

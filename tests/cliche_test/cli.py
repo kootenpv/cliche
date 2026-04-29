@@ -141,7 +141,7 @@ async def run_async(n: int = 1):
     return {"n": n * 2}
 
 
-# ---------- exceptions (for --notraceback / default paths) ----------
+# ---------- exceptions (for --full-traceback / default paths) ----------
 
 @cli
 def raises():

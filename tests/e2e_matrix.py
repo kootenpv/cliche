@@ -53,11 +53,11 @@ E2E_ARGV_MATRIX: dict[str, list[str]] = {
     # async
     "async_run":          ["run-async", "--n", "7"],
 
-    # --raw / --notraceback
+    # --raw / traceback trimming
     "raw_mode":           ["--raw", "echo-dict", "--tags", "a=1"],
     "default_pretty":     ["echo-dict", "--tags", "a=1"],
     "err_traceback":      ["raises"],
-    "err_terse":          ["--notraceback", "raises"],
+    "err_full_traceback": ["--full-traceback", "raises"],
 
     # discovery
     "help":               ["--help"],

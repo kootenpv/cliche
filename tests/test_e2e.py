@@ -205,19 +205,33 @@ def test_default_mode_is_pretty_json(cli_results):
     assert "\n" in p.stdout  # indented
 
 
-# ---------- global flags: --notraceback ----------
+# ---------- global flags: traceback trimming ----------
 
-def test_default_error_shows_traceback(cli_results):
+def test_default_error_shows_trimmed_traceback(cli_results):
     p = cli_results["err_traceback"]
     assert p.returncode != 0
-    assert "Traceback" in p.stderr or "ValueError" in p.stderr
+    assert "Traceback" in p.stderr
+    assert "ValueError: intentional error from fixture" in p.stderr
+    # Default trims middle wrapper frames (launcher.py / runtime.py / run.py)
+    # but keeps the entry shim so it's still visible cliche launched the
+    # process, with a "..." marker for the dropped frames.
+    assert "cliche/launcher.py" not in p.stderr
+    assert "cliche/runtime.py" not in p.stderr
+    assert "cliche/run.py" not in p.stderr
+    assert "cli.py" in p.stderr
+    assert "  ...\n" in p.stderr
+    # Entry frame is preserved — either `<string>` (pip-shim entry) or a frame
+    # mentioning cliche.launcher. One of these must be in the output.
+    assert "<string>" in p.stderr or "cliche.launcher" in p.stderr or "launch_" in p.stderr
 
 
-def test_notraceback_shows_terse_message_only(cli_results):
-    p = cli_results["err_terse"]
+def test_full_traceback_includes_wrapper_frames(cli_results):
+    p = cli_results["err_full_traceback"]
     assert p.returncode != 0
-    assert p.stderr.strip() == "ValueError: intentional error from fixture"
-    assert "Traceback" not in p.stderr
+    assert "Traceback" in p.stderr
+    assert "ValueError: intentional error from fixture" in p.stderr
+    # --full-traceback restores wrapper frames.
+    assert "cliche/run.py" in p.stderr or "cliche/runtime.py" in p.stderr
 
 
 # ---------- discovery flags ----------

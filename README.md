@@ -482,7 +482,7 @@ Every installed CLI gets these for free:
 | `--cli`         | CLI + Python version info, autocomplete status, cache location         |
 | `--llm-help`         | Compact LLM-friendly help: every command, signature, enum, default     |
 | `--raw`         | Plain `print()` of the return value — good for pipes                   |
-| `--notraceback` | On error, print only `ExcName: message`                                |
+| `--full-traceback` | Include cliche-internal wrapper frames in the traceback (default trims them) |
 | `--pdb`         | Post-mortem on exception (prefers `ipdb` via `[debug]` extra)          |
 | `--pip [args]`  | Run `pip` in this CLI's Python env: `mytool --pip list`                |
 | `--pyspy N`     | Profile for N seconds, write speedscope JSON                           |
