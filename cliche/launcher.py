@@ -91,6 +91,14 @@ def _maybe_self_upgrade_shim(pkg: str) -> None:
     """
     import os
     import sys
+    # Permanent opt-out: users who want to stay on the Python shim
+    # (debugging, suspicious of the C path, want consistent argparse
+    # rendering, …) can set CLICHE_NO_FAST_SHIM=1 in their env. The
+    # canonical undo for an existing fast-shim is `pip install --force-
+    # reinstall <pkg>`, which writes pip's stock Python shim — combined
+    # with this flag, it stays a Python shim across every invocation.
+    if os.environ.get("CLICHE_NO_FAST_SHIM"):
+        return
     try:
         path = sys.argv[0]
         if not path or not os.path.isfile(path) or not os.access(path, os.W_OK):

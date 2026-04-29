@@ -1323,13 +1323,16 @@ def install(name: str, module_dir: str = None, no_pip: bool = False,
         print(f"Installed as an isolated uv tool. Binary is on PATH via ~/.local/bin/{name}.")
         print(f"Manage via: uv tool {{list,upgrade,uninstall}}  (or `cliche uninstall {name}`).")
 
-    # Auto-apply the fast-shim wrapper (clichec-backed). Skipped when no C
-    # compiler is present (with a one-time hint on how to get one — see
-    # _print_no_compiler_hint); tool installs are also skipped because the
-    # binary lives in an isolated venv whose package layout this interpreter
-    # can't `find_spec` into. Failures are non-fatal — the binary keeps
-    # working as a plain Python shim.
-    if not no_pip and not tool:
+    # Auto-apply the fast-shim wrapper (clichec-backed). Skipped when:
+    #   - no C compiler is present and no wheel-bundled binary either (the
+    #     yellow one-time hint covers this — see _print_no_compiler_hint)
+    #   - it's a `--tool` install (binary lives in an isolated uv-tool venv
+    #     whose package layout this interpreter can't `find_spec` into)
+    #   - CLICHE_NO_FAST_SHIM=1 is set (permanent opt-out for users who
+    #     want to stay on the Python shim — debugging, suspicious of the
+    #     C path, etc; matches the same flag in cliche.launcher)
+    # Failures are non-fatal: the binary keeps working as a plain Python shim.
+    if not no_pip and not tool and not os.environ.get("CLICHE_NO_FAST_SHIM"):
         try:
             from cliche._clichec import install_fast_shim, ensure_built
             if ensure_built(verbose=False):
