@@ -2220,6 +2220,7 @@ def _tilde_home(p: str) -> str:
 def list_installed():
     """List CLI tools installed via cliche (detected by the `_cliche.py` entry point)."""
     import hashlib
+    import importlib.util
     import json
     import os
     from importlib.metadata import PackageNotFoundError, entry_points, version
@@ -2233,11 +2234,19 @@ def list_installed():
         if pkg_name is None:
             continue
 
-        # Resolve package dir
+        # Resolve package dir WITHOUT importing — `__import__` would execute the
+        # package's __init__.py (and all its transitive imports), which dominated
+        # `cliche ls` runtime: a single CLI pulling in pydantic/google-genai
+        # cost ~1s on its own. `find_spec` only locates the file.
         try:
-            mod = __import__(pkg_name)
-            pkg_path = Path(mod.__file__).parent if mod.__file__ else None
-        except Exception:
+            spec = importlib.util.find_spec(pkg_name)
+        except (ImportError, ValueError):
+            spec = None
+        if spec and spec.origin:
+            pkg_path = Path(spec.origin).parent
+        elif spec and spec.submodule_search_locations:
+            pkg_path = Path(next(iter(spec.submodule_search_locations)))
+        else:
             pkg_path = None
 
         # Version
@@ -2352,22 +2361,15 @@ def list_installed():
 
     rows.sort(key=lambda r: r["binary"])
 
-    # Per-binary: which pkg's shim is actually on disk? This drives the
-    # LIVE / MASKED column below. Cached once per distinct binary name because
-    # _shim_owner reads the shim file (cheap but not free).
-    live_owners: dict[str, str | None] = {}
-    for bin_name in {r["binary"] for r in rows}:
-        live_owners[bin_name] = _shim_owner(bin_name)
-
-    # Per-binary: SHIM column shows whether the on-disk shim is the C-backed
-    # fast-shim wrapper (`c`) or pip's stock Python shell (`py`). Resolved by
-    # peeking at the first ~512 bytes of the file looking for the
-    # `# cliche fast-shim wrapper` marker `_clichec.WRAPPER_MARKER` writes.
-    # Cached per binary so a single `cliche ls` opens each shim file once.
+    # Per-binary: read each shim file ONCE and derive both the LIVE/MASKED
+    # owner (regex against full content) and the SHIM kind (`c`/`py`/`?` from
+    # the WRAPPER_MARKER in the first ~512 bytes). Previously these were two
+    # separate passes that each called shutil.which + open per binary.
     try:
-        from cliche._clichec import is_fast_shim
+        from cliche._clichec import WRAPPER_MARKER
     except ImportError:
-        is_fast_shim = lambda _p: False  # type: ignore[assignment]
+        WRAPPER_MARKER = "# cliche fast-shim wrapper"
+    live_owners: dict[str, str | None] = {}
     shim_kinds: dict[str, str] = {}
     for bin_name in {r["binary"] for r in rows}:
         path = shutil.which(bin_name)
@@ -2375,8 +2377,17 @@ def list_installed():
         # ~/.local/bin isn't exported, broken paths after a venv move, etc).
         if not path:
             shim_kinds[bin_name] = "?"
-        else:
-            shim_kinds[bin_name] = "c" if is_fast_shim(path) else "py"
+            live_owners[bin_name] = None
+            continue
+        try:
+            content = Path(path).read_text(errors="replace")
+        except OSError:
+            shim_kinds[bin_name] = "?"
+            live_owners[bin_name] = None
+            continue
+        shim_kinds[bin_name] = "c" if WRAPPER_MARKER in content[:512] else "py"
+        m = re.search(r'from\s+([A-Za-z_][A-Za-z0-9_]*)\._cliche\s+import\s+main', content)
+        live_owners[bin_name] = m.group(1) if m else None
 
     # STATUS:
     #   ok     = single-row binary, nothing conflicting (the common case)
@@ -2428,15 +2439,24 @@ def list_installed():
         r["shim"] = shim_kinds.get(r["binary"], "?")
 
     # AUTOCOMP: yes/no per binary based on shell rc inspection. Same detection
-    # as `<binary> --cli` (via cliche.run._detect_autocomplete) so both
-    # surfaces stay in sync.
-    try:
-        from cliche.run import _detect_autocomplete
-    except ImportError:
-        _detect_autocomplete = lambda _b: False  # type: ignore[assignment]
+    # logic as `<binary> --cli` (cliche.run._detect_autocomplete) but here we
+    # read each rc file ONCE and substring-test all binaries against the cached
+    # contents — a per-binary loop would re-read the same 5 files N times.
+    rc_blobs: list[str] = []
+    for config in ("~/.bashrc", "~/.zshrc", "~/.bash_profile", "~/.zprofile",
+                   "~/.config/fish/config.fish"):
+        try:
+            with open(os.path.expanduser(config)) as f:
+                rc_blobs.append(f.read())
+        except (FileNotFoundError, IOError, OSError):
+            pass
     autocomp_for: dict[str, bool] = {}
     for bin_name in {r["binary"] for r in rows}:
-        autocomp_for[bin_name] = _detect_autocomplete(bin_name)
+        needle_bash = f"register-python-argcomplete {bin_name}"
+        needle_fish = f"register-python-argcomplete --shell fish {bin_name}"
+        autocomp_for[bin_name] = any(
+            needle_bash in blob or needle_fish in blob for blob in rc_blobs
+        )
     for r in rows:
         r["autocomp"] = "yes" if autocomp_for.get(r["binary"]) else "no"
 
