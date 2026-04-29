@@ -308,9 +308,13 @@ def cmd_release(args: argparse.Namespace) -> None:
     _twine_check(wheels)
 
     # 4. Stage pyproject.toml alongside whatever the user already staged,
-    #    then single commit + tag.
+    #    then single commit + tag. Without -m, fall back to the same
+    #    `release: X.Y.Z` shape `bump --commit` uses, so a version-only
+    #    release reads consistently in `git log` regardless of which path
+    #    produced it.
     _run(["git", "add", str(PYPROJECT)])
-    _run(["git", "commit", "-m", f"{args.message} (v{version})"])
+    commit_msg = f"{args.message} (v{version})" if args.message else f"release: {version}"
+    _run(["git", "commit", "-m", commit_msg])
     _run(["git", "tag", tag])
 
     # 5. Publish. If this fails, the commit/tag exist locally but not on
@@ -363,8 +367,14 @@ def main() -> None:
         help="One-shot: bump + single commit with staged files + tag + build + publish + push",
     )
     r.add_argument("part", choices=["patch", "minor", "major"])
-    r.add_argument("-m", "--message", required=True,
-                   help="Commit message (version suffix is appended automatically).")
+    r.add_argument(
+        "-m", "--message", default=None,
+        help=(
+            "Commit message; the version suffix `(vX.Y.Z)` is appended "
+            "automatically. Omit to default to the bare `release: X.Y.Z` "
+            "form (matches what `bump --commit` produces)."
+        ),
+    )
     r.add_argument("--test", action="store_true", help="Publish to TestPyPI instead of PyPI")
     r.add_argument("--no-push", action="store_true", help="Skip `git push` / tag push")
     r.add_argument("--remote-host", default=DEFAULT_REMOTE,
