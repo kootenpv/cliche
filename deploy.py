@@ -3,17 +3,26 @@
 
 Usage:
     python deploy.py bump {patch,minor,major}      [--commit]
-    python deploy.py deploy                        [--test] [--no-tag] [--no-push]
-    python deploy.py release {patch,minor,major} -m MSG  [--test] [--no-push]
+    python deploy.py deploy                        [--test] [--no-tag] [--no-push] [--remote-host HOST]
+    python deploy.py release {patch,minor,major} -m MSG  [--test] [--no-push] [--remote-host HOST]
 
 `bump` delegates to `uv version --bump <part>`, which rewrites the
 `version = "..."` line in pyproject.toml (single source of truth —
 `__version__` is read via importlib.metadata at runtime). Pre-1.0 a `minor`
 bump is allowed to be breaking; post-1.0 follow semver strictly.
 
-`deploy` runs `uv build` and `uv publish` on the already-bumped version.
-Pass `--test` to route to TestPyPI. By default it also tags `vX.Y.Z` and
-pushes it; opt out with `--no-tag` / `--no-push`.
+`deploy` builds every platform wheel and runs `uv publish` on the already-
+bumped version. The build step delegates to `scripts/build_all_wheels.sh`
+which produces:
+  - cliche-X.Y.Z-py3-none-manylinux2014_x86_64.whl   (native)
+  - cliche-X.Y.Z-py3-none-manylinux2014_aarch64.whl  (cross-compile + qemu)
+  - cliche-X.Y.Z-py3-none-macosx_11_0_arm64.whl      (remote on the Mac)
+  - cliche-X.Y.Z-py3-none-any.whl                    (fallback w/o binary)
+Pass `--remote-host HOST` (or set REMOTE_HOST) to enable the macos-arm64
+build via ssh+rsync to a Mac. Without it, that wheel is silently skipped
+and macOS users fall back to compile-on-install.
+Pass `--test` to route uv publish to TestPyPI. By default it also tags
+`vX.Y.Z` and pushes it; opt out with `--no-tag` / `--no-push`.
 
 `release` is the one-shot: bump + single commit including your staged files
 + tag + build + publish + push. Use when you want staged changes and the
@@ -128,12 +137,71 @@ def cmd_bump(args: argparse.Namespace) -> None:
         print(f"committed + tagged v{after} (push with: git push && git push --tags)")
 
 
-def _clean_dist() -> None:
-    """Remove stale dist/ contents so an old wheel can't slip into the upload."""
-    dist = ROOT / "dist"
-    if dist.exists():
-        for f in dist.iterdir():
-            f.unlink()
+def _build_all_wheels(remote_host: str | None) -> list[Path]:
+    """Run scripts/build_all_wheels.sh and return the produced wheel paths.
+
+    Always builds:
+      - linux-x86_64 (native cc)
+      - linux-aarch64 (cross-compile + qemu smoke-test, IFF the toolchain
+        is installed locally — the script auto-skips when it's missing)
+      - py3-none-any  (fallback, no bundled binary)
+
+    Builds macos-arm64 only when `remote_host` is provided (or REMOTE_HOST
+    is set in the env). Without it, the macOS wheel is omitted and macOS
+    users fall back to compile-on-install via the py3-none-any wheel.
+
+    The script itself handles dist/ cleanup and order (platform wheels
+    first because they consume the py3-none-any source via `wheel tags
+    --remove`; the fallback any-wheel is built last so it survives in
+    dist/). We just invoke and verify.
+    """
+    script = ROOT / "scripts" / "build_all_wheels.sh"
+    if not script.exists():
+        sys.exit(f"error: {script} missing — wheel build script is required")
+    env = os.environ.copy()
+    # Empty string = explicit skip (vs the default `mba` which means "use it").
+    # Drop REMOTE_HOST from the env entirely so the build script's "skipping"
+    # branch fires cleanly — passing an empty REMOTE_HOST would still make
+    # the script attempt ssh to "" and fail noisily.
+    if remote_host:
+        env["REMOTE_HOST"] = remote_host
+    else:
+        env.pop("REMOTE_HOST", None)
+        print("note: macos-arm64 wheel will NOT be built (--remote-host empty)",
+              file=sys.stderr)
+        print("      macOS users will fall back to compile-on-install via py3-none-any",
+              file=sys.stderr)
+    print("$", str(script), flush=True)
+    subprocess.run([str(script)], check=True, env=env)
+    wheels = sorted((ROOT / "dist").glob("cliche-*.whl"))
+    if not wheels:
+        sys.exit("error: build script ran but produced no wheels in dist/")
+    print(f"built {len(wheels)} wheel(s):")
+    for w in wheels:
+        print(f"  {w.name}  ({w.stat().st_size} bytes)")
+    return wheels
+
+
+def _twine_check(wheels: list[Path]) -> None:
+    """Run `twine check` on every built wheel as a metadata sanity gate.
+
+    Twine validates the wheel's Description (long_description rendering,
+    classifier list, project URLs) and would catch the kind of mistake
+    that publishes successfully but renders broken on the project's
+    PyPI page. Cheap (<1s) and a hard line before publish.
+
+    Prefers a standalone `twine` binary on PATH; falls back to `python -m
+    twine` so this works in environments where twine was pip-installed
+    into a venv but the entrypoint script isn't on PATH (common with
+    pyenv/conda layouts).
+    """
+    twine_bin = shutil.which("twine")
+    cmd = [twine_bin, "check", *map(str, wheels)] if twine_bin \
+        else [sys.executable, "-m", "twine", "check", *map(str, wheels)]
+    print("$", " ".join(cmd), flush=True)
+    r = subprocess.run(cmd)
+    if r.returncode != 0:
+        sys.exit("error: twine check failed — fix wheel metadata before publishing")
 
 
 def _publish(uv: str, test: bool) -> None:
@@ -179,8 +247,11 @@ def cmd_deploy(args: argparse.Namespace) -> None:
             "then re-run `python deploy.py deploy`."
         )
 
-    _clean_dist()
-    _run([uv, "build"])
+    # Multi-platform build: produces py3-none-any (fallback) plus per-arch
+    # wheels for the platforms we ship binaries for. Replaces the old single
+    # `uv build` which only emitted the py3-none-any.
+    wheels = _build_all_wheels(args.remote_host)
+    _twine_check(wheels)
     _publish(uv, args.test)
 
     tag = f"v{version}"
@@ -192,7 +263,7 @@ def cmd_deploy(args: argparse.Namespace) -> None:
         _run(["git", "push", "origin", tag], check=False)
 
     target = "TestPyPI" if args.test else "PyPI"
-    print(f"done: published {version} to {target}")
+    print(f"done: published {version} ({len(wheels)} wheels) to {target}")
 
 
 def cmd_release(args: argparse.Namespace) -> None:
@@ -230,9 +301,11 @@ def cmd_release(args: argparse.Namespace) -> None:
     print(f"bumped: {before} → {version}")
 
     # 3. Build now — fail fast if the tree is broken, before touching git.
-    #    The build picks up the freshly-written llms.txt from disk.
-    _clean_dist()
-    _run([uv, "build"])
+    #    The build picks up the freshly-written llms.txt from disk and runs
+    #    the multi-platform orchestrator (py3-none-any + linux-x86_64 +
+    #    optional linux-aarch64 cross-compile + optional macos-arm64 over ssh).
+    wheels = _build_all_wheels(args.remote_host)
+    _twine_check(wheels)
 
     # 4. Stage pyproject.toml alongside whatever the user already staged,
     #    then single commit + tag.
@@ -270,10 +343,19 @@ def main() -> None:
                    help="Also `git add pyproject.toml && git commit && git tag vX.Y.Z`")
     b.set_defaults(func=cmd_bump)
 
-    d = sub.add_parser("deploy", help="`uv build` + `uv publish` (+ tag + push)")
+    # `mba` is the maintainer's Apple Silicon laptop reachable over LAN
+    # (configured in ~/.ssh/config). Anyone else maintaining the project
+    # would override via --remote-host or the REMOTE_HOST env var. Set to
+    # the literal string "" to disable the macos-arm64 build entirely.
+    DEFAULT_REMOTE = os.environ.get("REMOTE_HOST", "mba")
+
+    d = sub.add_parser("deploy", help="build all wheels + `uv publish` (+ tag + push)")
     d.add_argument("--test", action="store_true", help="Publish to TestPyPI instead of PyPI")
     d.add_argument("--no-tag", action="store_true", help="Skip `git tag vX.Y.Z`")
     d.add_argument("--no-push", action="store_true", help="Skip `git push` / tag push")
+    d.add_argument("--remote-host", default=DEFAULT_REMOTE,
+                   help=("ssh host for macos-arm64 wheel build (default: %(default)s; "
+                         "pass empty string to skip)."))
     d.set_defaults(func=cmd_deploy)
 
     r = sub.add_parser(
@@ -285,6 +367,9 @@ def main() -> None:
                    help="Commit message (version suffix is appended automatically).")
     r.add_argument("--test", action="store_true", help="Publish to TestPyPI instead of PyPI")
     r.add_argument("--no-push", action="store_true", help="Skip `git push` / tag push")
+    r.add_argument("--remote-host", default=DEFAULT_REMOTE,
+                   help=("ssh host for macos-arm64 wheel build (default: %(default)s; "
+                         "pass empty string to skip)."))
     r.set_defaults(func=cmd_release)
 
     args = parser.parse_args()
