@@ -2830,6 +2830,16 @@ def main_cli():
         cli_info(pkg_name="cliche")
         return
     parser.add_argument(
+        "--cli",
+        action="store_true",
+        help="Show CLI and Python version info for the cliche binary itself",
+    )
+    parser.add_argument(
+        "--version",
+        action="store_true",
+        help="Print the cliche version and exit",
+    )
+    parser.add_argument(
         "--llm-help",
         action="store_true",
         help="Print an LLM-oriented guide to building tools with cliche, then exit",
