@@ -117,7 +117,14 @@ def _maybe_self_upgrade_shim(pkg: str) -> None:
             pkg_dir = str(list(spec.submodule_search_locations)[0])
         else:
             return
-        install_fast_shim(os.path.basename(path), pkg, pkg_dir)
+        # Pass the exact `path` we just read — without it, install_fast_shim
+        # falls back to `shutil.which(binary_name)` which can resolve to a
+        # SAME-NAMED shim in another venv that happens to be on PATH (e.g.
+        # the system pyenv's `bin/<name>` while we run inside a fresh test
+        # venv). Pinning here keeps self-upgrade scoped to the exact shim
+        # whose Python we're currently executing.
+        install_fast_shim(os.path.basename(path), pkg, pkg_dir,
+                          target_path=path)
     except Exception:
         # Never let the upgrade fail the user's invocation.
         pass

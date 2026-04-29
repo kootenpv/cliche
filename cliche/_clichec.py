@@ -1,7 +1,7 @@
 """Locate / build the C fast-fail launcher (`clichec`).
 
 The native launcher lives at ``cliche/clichec.c`` in this package. We compile
-it on demand into ``$XDG_DATA_HOME/cliche/clichec-<cliche_version>`` so version
+it on demand into ``$XDG_CACHE_HOME/cliche/clichec-<cliche_version>`` so version
 bumps invalidate stale binaries in place. ``fast-shim`` then writes a shell
 wrapper that exec's this binary and falls back to the Python launcher when
 the C side returns 64 ("I can't handle this").
@@ -24,7 +24,7 @@ def source_path() -> Path:
 
 
 def _state_dir() -> Path:
-    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
     d = Path(base) / "cliche"
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -59,10 +59,11 @@ def _bundled_binary() -> Path | None:
 def _user_compile_target() -> Path:
     """Where `build()` writes the user-compiled clichec binary.
 
-    Lives under XDG_DATA_HOME so it survives Python venv churn (`pip install`
+    Lives under XDG_CACHE_HOME so it survives Python venv churn (`pip install`
     inside a fresh venv won't trigger another compile if the binary still
     matches the cliche version). Always a writable location, never the
     package's own directory — that's read-only on system installs.
+    Co-located with the dispatch JSON cache used by clichec itself.
     """
     return _state_dir() / _binary_name()
 
@@ -73,7 +74,7 @@ def binary_path() -> Path:
     Used by `install_fast_shim` to embed an absolute clichec path into the
     shell wrapper. Returning the bundled path when present means the
     wrapper points directly at the binary inside site-packages (no
-    XDG_DATA_HOME indirection), surviving `XDG_DATA_HOME` changes. Falling
+    XDG_CACHE_HOME indirection), surviving `XDG_CACHE_HOME` changes. Falling
     back to the user-cache target lets the same logic work for the pure
     fallback wheel where the user compiled clichec themselves.
     """
@@ -135,7 +136,7 @@ def ensure_built(verbose: bool = False) -> Path | None:
 
     Resolution order:
       1. wheel-bundled binary at `cliche/_bin/clichec` — instant, no compile
-      2. user-cache binary at `$XDG_DATA_HOME/cliche/clichec-<ver>` — survives
+      2. user-cache binary at `$XDG_CACHE_HOME/cliche/clichec-<ver>` — survives
          Python env churn
       3. compile from `clichec.c` into the user cache, return that
       4. None on failure (no compiler available)
@@ -233,15 +234,25 @@ def _resolve_installed_binary(binary_name: str) -> str | None:
 
 
 def install_fast_shim(binary_name: str, package_name: str, pkg_dir: str,
-                      verbose: bool = False) -> tuple[bool, str]:
+                      verbose: bool = False,
+                      target_path: str | None = None) -> tuple[bool, str]:
     """Replace the pip-generated console-script for `binary_name` with a shell
     wrapper that exec's clichec first, falling back to the Python launcher.
+
+    `target_path` lets callers pin the exact shim file to rewrite. Used by
+    `cliche.launcher._maybe_self_upgrade_shim` which already knows the
+    canonical path via `sys.argv[0]` — without pinning, a `shutil.which`
+    fallback could match a same-named shim in a different venv on PATH and
+    rewrite the wrong file. (Real bug observed: a fresh-venv install of
+    `clout` ran the launcher inside the new venv's Python, but
+    `shutil.which("clout")` resolved to a system-wide editable install
+    on PATH and the upgrade overwrote that one instead.)
 
     Returns ``(ok, message)``. On failure the existing shim is left untouched.
     """
     import hashlib
 
-    target = _resolve_installed_binary(binary_name)
+    target = target_path or _resolve_installed_binary(binary_name)
     if not target:
         return False, f"binary '{binary_name}' not on PATH — install it first"
 
@@ -285,62 +296,20 @@ def install_fast_shim(binary_name: str, package_name: str, pkg_dir: str,
 
 
 def is_fast_shim(path: str | Path) -> bool:
+    """True if the file at `path` is a cliche-written fast-shim wrapper.
+
+    Used by `cliche ls` to fill the SHIM column. We deliberately do NOT
+    expose a `restore_python_shim` counterpart: pip's natural reinstall
+    flow (`pip install --force-reinstall <pkg>`) produces a stock Python
+    shim and serves as the canonical undo if a user ever wants to
+    revert. The launcher's auto-upgrade then re-applies on the next run,
+    so opting out *permanently* requires the `CLICHE_NO_FAST_SHIM=1`
+    env flag instead — see `cliche.launcher._maybe_self_upgrade_shim`
+    and `cliche.install.install`.
+    """
     try:
         with open(path) as f:
             head = f.read(512)
         return WRAPPER_MARKER in head
     except OSError:
         return False
-
-
-_PY_SHIM_TEMPLATE = """#!{python}
-# -*- coding: utf-8 -*-
-import re
-import sys
-from cliche.launcher import launch_{pkg}
-if __name__ == "__main__":
-    sys.argv[0] = re.sub(r"(-script\\.pyw|\\.exe)?$", "", sys.argv[0])
-    sys.exit(launch_{pkg}())
-"""
-
-
-def restore_python_shim(binary_name: str) -> tuple[bool, str]:
-    """Rewrite a fast-shim wrapper back to the canonical pip-generated Python
-    shim. Looks the same as the script pip would emit on `pip install -e .`,
-    so re-running pip leaves the file untouched.
-
-    Refuses to touch shims that don't carry the fast-shim marker, so calling
-    this against a stock pip shim is a safe no-op.
-    """
-    target = shutil.which(binary_name)
-    if not target:
-        return False, f"binary '{binary_name}' not on PATH"
-    try:
-        contents = Path(target).read_text()
-    except OSError as e:
-        return False, f"cannot read {target}: {e}"
-    if WRAPPER_MARKER not in contents:
-        return False, f"{target} is not a cliche fast-shim wrapper (left as-is)"
-
-    # Recover PKG and PYTHON from the wrapper itself; they were embedded at
-    # write time so we don't need to look them up again.
-    import re
-    m_pkg = re.search(r'^PKG="([^"]+)"', contents, re.MULTILINE)
-    m_py  = re.search(r'^PYTHON="([^"]+)"', contents, re.MULTILINE)
-    if not m_pkg or not m_py:
-        return False, f"wrapper at {target} is malformed; cannot restore"
-    pkg = m_pkg.group(1)
-    python = m_py.group(1)
-    new_shim = _PY_SHIM_TEMPLATE.format(python=python, pkg=pkg)
-    tmp = Path(target).with_suffix(".cliche-tmp")
-    try:
-        tmp.write_text(new_shim)
-        tmp.chmod(0o755)
-        os.replace(tmp, target)
-    except OSError as e:
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
-        return False, f"failed to write shim {target}: {e}"
-    return True, f"restored Python shim at {target}"

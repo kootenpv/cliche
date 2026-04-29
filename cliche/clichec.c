@@ -39,6 +39,32 @@
 #define EXPECTED_CACHE_VERSION "2.2"
 
 /* ============================================================
+ *                  portable mtime accessor
+ * ============================================================
+ *
+ * `st_mtime` is universally a `time_t` (integer seconds) — fine but lossy
+ * vs Python's float `os.stat().st_mtime`. To match the precision we need
+ * a nanosecond field, which is spelled differently per OS:
+ *   - Linux / glibc / POSIX.1-2008  →  st.st_mtim.tv_nsec
+ *   - macOS (default headers)       →  st.st_mtimensec   (a `long`, not timespec)
+ *
+ * We tried using `st.st_mtimespec.tv_nsec` for parity with timespec on
+ * both sides, but on default macOS builds `st_mtimespec` is only defined
+ * when `_DARWIN_USE_64_BIT_INODE` is set — easy to forget on cross-builds
+ * and a compile error when missed. `st_mtimensec` is always available on
+ * macOS without any feature macros, so we use it directly.
+ *
+ * Pairing: `st_mtime` (seconds) + ST_MTIM_NSEC(st) (nanoseconds) is
+ * portable across Linux + macOS + most BSDs without #ifdef noise at
+ * every call site.
+ */
+#ifdef __APPLE__
+#define ST_MTIM_NSEC(st) ((st).st_mtimensec)
+#else
+#define ST_MTIM_NSEC(st) ((st).st_mtim.tv_nsec)
+#endif
+
+/* ============================================================
  *                      ANSI color
  * ============================================================
  *
@@ -49,20 +75,24 @@
  * TTY" default.
  */
 static int color_out = 0;
-static int color_err = 0;
 #define ANSI_BLUE  "\033[1;36m"
 #define ANSI_RED   "\033[1;31m"
 #define ANSI_RESET "\033[0m"
 
+/* Only colour stdout — stderr stays plain to match run.py's `Unknown
+ * command:` line (Python doesn't colour that either). If we ever want
+ * red error styling, both sides must change together; track state here. */
 static void detect_colors(void) {
     if (getenv("NO_COLOR")) return;
     int force = getenv("FORCE_COLOR") != NULL;
     color_out = force || isatty(STDOUT_FILENO);
-    color_err = force || isatty(STDERR_FILENO);
 }
 
+/* `red_on` lived here to colour the C-side "Unknown command" stderr line.
+ * Dropped for parity with run.py, which prints plain stderr. ANSI_RED is
+ * left defined so a future addition can re-enable red without rewiring
+ * the macros — see the unknown_command comment for why parity matters. */
 static const char *blue_on(int on)  { return on ? ANSI_BLUE  : ""; }
-static const char *red_on(int on)   { return on ? ANSI_RED   : ""; }
 static const char *reset_on(int on) { return on ? ANSI_RESET : ""; }
 
 /* ============================================================
@@ -526,7 +556,7 @@ static int cache_is_fresh(const jv *cache, const char *pkg_dir) {
                 fprintf(stderr, "clichec: stat failed for file %s\n", buf);
             return 0;
         }
-        double cur = (double)st.st_mtim.tv_sec + st.st_mtim.tv_nsec / 1e9;
+        double cur = (double)st.st_mtime + ST_MTIM_NSEC(st) / 1e9;
         double want = mv->u.n;
         double diff = cur - want;
         if (diff < 0) diff = -diff;
@@ -563,7 +593,7 @@ static int cache_is_fresh(const jv *cache, const char *pkg_dir) {
                     fprintf(stderr, "clichec: stat failed for dir %s\n", buf);
                 return 0;
             }
-            double cur = (double)st.st_mtim.tv_sec + st.st_mtim.tv_nsec / 1e9;
+            double cur = (double)st.st_mtime + ST_MTIM_NSEC(st) / 1e9;
             double want = mv->u.n;
             double diff = cur - want;
             if (diff < 0) diff = -diff;
@@ -639,115 +669,23 @@ static void emit_param_llm_pyparity(const jv *p, FILE *out, const jv *enums) {
     }
 }
 
-static void emit_function_llm(const jv *fn, FILE *out, const jv *enums) {
-    const jv *name   = jv_obj_get(fn, "name");
-    const jv *params = jv_obj_get(fn, "parameters");
-    if (!name || name->kind != JV_STR) return;
-    fputs(name->u.str.s, out);
-    fputc('(', out);
-    if (params && params->kind == JV_ARR) {
-        int first = 1;
-        for (size_t i = 0; i < params->u.arr.n; i++) {
-            const jv *p = &params->u.arr.items[i];
-            if (p->kind != JV_OBJ) continue;
-            const jv *pname = jv_obj_get(p, "name");
-            if (!pname || pname->kind != JV_STR) continue;
-            if (strcmp(pname->u.str.s, "self") == 0 ||
-                strcmp(pname->u.str.s, "cls") == 0) continue;
-            if (!first) fputs(", ", out);
-            first = 0;
-            emit_param_llm_pyparity(p, out, enums);
-        }
-    }
-    fputc(')', out);
+/* `emit_function_llm` (compact `name(args) # doc` rendering) was the
+ * helper for the old top-level --llm-help; deleted with `render_llm_help`
+ * because that whole code path now defers to Python (see comment above).
+ * Per-command --llm-help (render_command_llm) emits param-by-param, not
+ * via this compact form, so the helper has no remaining callers. */
 
-    /* docstring first-line as " # ..." (matches format_function_llm). */
-    const jv *doc = jv_obj_get(fn, "docstring");
-    if (doc && doc->kind == JV_STR && doc->u.str.l) {
-        const char *s = doc->u.str.s;
-        size_t i = 0;
-        /* strip leading whitespace to find first non-blank line, like
-         * Python's `doc.strip().split('\\n')[0].strip()`. */
-        while (s[i] == ' ' || s[i] == '\t' || s[i] == '\n') i++;
-        size_t start = i;
-        while (s[i] && s[i] != '\n') i++;
-        /* trim trailing whitespace */
-        size_t end = i;
-        while (end > start &&
-               (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\r'))
-            end--;
-        if (end > start && s[start] != ':') {
-            fputs(" # ", out);
-            fwrite(s + start, 1, end - start, out);
-        }
-    }
-    fputc('\n', out);
-}
-
-static void render_llm_help(const jv *cache, const char *prog, CmdList *cmds) {
-    FILE *out = stdout;
-    fprintf(out, "# %s CLI - Run: %s <cmd> [args] (space-separated)\n", prog, prog);
-    fputs("# Syntax: fn(pos:Type, opt?:Type=default). No ? = positional arg. ? = optional --flag value.\n", out);
-    fputs("# Bool flags shown as --flag or --no-flag (use as-is to toggle). Lists/tuples/sets/frozensets: --items a b c.\n", out);
-    fputs("# Output: any print() inside the function goes to stdout; a non-None return value is auto-printed.\n", out);
-    fprintf(out, "# Per-command detail (full signature, types, defaults, docstrings): %s <cmd> --llm-help  or  %s <group> <cmd> --llm-help\n", prog, prog);
-    fputc('\n', out);
-
-    /* ungrouped commands */
-    int any_un = 0;
-    for (size_t i = 0; i < cmds->n; i++) {
-        if (!cmds->items[i].group) { any_un = 1; break; }
-    }
-    if (any_un) {
-        fputs("## commands\n", out);
-        for (size_t i = 0; i < cmds->n; i++) {
-            if (cmds->items[i].group) continue;
-            emit_function_llm(cmds->items[i].func, out, jv_obj_get(cache, "enums"));
-        }
-        fputc('\n', out);
-    }
-    /* grouped */
-    const char *cur = NULL;
-    for (size_t i = 0; i < cmds->n; i++) {
-        const CmdEntry *e = &cmds->items[i];
-        if (!e->group) continue;
-        if (!cur || strcmp(cur, e->group)) {
-            if (cur) fputc('\n', out);
-            fprintf(out, "## subcommand: %s\n", e->group);
-            cur = e->group;
-        }
-        emit_function_llm(e->func, out, jv_obj_get(cache, "enums"));
-    }
-    if (cur) fputc('\n', out);
-
-    fputs("## options\n", out);
-    fputs("--pdb: Drop into debugger on error\n", out);
-    fputs("--pip [args]: Run pip for this CLI's Python env\n", out);
-    fputs("--uv [args]: Run uv targeting this CLI's Python env\n", out);
-    fputs("--pyspy N: Profile for N seconds with py-spy\n", out);
-    fputs("--raw: Print return value as-is (no JSON, no color) — good for pipes\n", out);
-    fputs("--notraceback: On error, print only ExcName: message\n", out);
-    fputs("--timing: Show timing information\n", out);
-    fputs("--skip-gen: Skip cache regeneration\n", out);
-
-    /* enums (compressed) */
-    const jv *enums = jv_obj_get(cache, "enums");
-    if (enums && enums->kind == JV_OBJ && enums->u.obj.n) {
-        fputs("\n## enums\n", out);
-        for (size_t i = 0; i < enums->u.obj.n; i++) {
-            const jv *vs = &enums->u.obj.vals[i];
-            if (vs->kind != JV_ARR) continue;
-            fputs(enums->u.obj.keys[i], out);
-            fputs(": ", out);
-            for (size_t j = 0; j < vs->u.arr.n; j++) {
-                if (j) fputc(' ', out);
-                const jv *v = &vs->u.arr.items[j];
-                if (v->kind == JV_STR) fputs(v->u.str.s, out);
-            }
-            fputc('\n', out);
-        }
-    }
-}
+/* Top-level `--llm-help` is intentionally NOT C-served.
+ *
+ * We had a `render_llm_help()` here that emitted the `## commands` /
+ * `## subcommand:` / `## enums` blocks. It got dropped because run.py's
+ * version embeds an env-info snapshot (Python interpreter version, pip
+ * path, autocomplete state, package version from pyproject) that's
+ * impractical to faithfully reproduce in C. The dispatch in main()
+ * returns DEFER for `<bin> --llm-help` so the wrapper falls through to
+ * Python, which keeps the LLM-facing surface canonical. Per-command
+ * `--llm-help` (render_command_llm, below) is simpler and stays C-served.
+ */
 
 static int render_command_llm(const jv *cache, const char *prog,
                               const jv *fn, const char *group,
