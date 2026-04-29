@@ -685,7 +685,6 @@ def _print_llm_output_json(commands: dict, subcommands: dict, enums: dict,
         '--raw': 'Print return value as-is (no JSON, no color) — good for pipes',
         '--full-traceback': 'Show the full traceback including cliche-internal wrapper frames',
         '--timing': 'Show timing information',
-        '--skip-gen': 'Skip cache regeneration',
     }
 
     # Output minified JSON
@@ -755,7 +754,6 @@ def _print_llm_output_lines(commands: dict, subcommands: dict, enums: dict,
     lines.append("--raw: Print return value as-is (no JSON, no color) — good for pipes")
     lines.append("--full-traceback: Show the full traceback including cliche-internal wrapper frames")
     lines.append("--timing: Show timing information")
-    lines.append("--skip-gen: Skip cache regeneration")
     lines.append("")
 
     # Add enums
@@ -828,7 +826,7 @@ def print_llm_command_help(func: dict, prog_name: str, cmd: str, group: str = No
     print("## global options")
     print("--pdb: debugger on error | --pyspy N: profile Ns | --raw: plain output (no JSON/color)")
     print("--full-traceback: include cliche wrappers | --timing: timing info | --llm-help: this view")
-    print(f"# Top-level only (run on `{prog_name}` itself): --version, --cli, --pip, --uv, --skip-gen — see `{prog_name} --llm-help`")
+    print(f"# Top-level only (run on `{prog_name}` itself): --version, --cli, --pip, --uv — see `{prog_name} --llm-help`")
 
 
 
@@ -855,14 +853,13 @@ def print_help(commands, subcommands, prog_name: str = "run.py"):
     print(f"  {Colors.blue('-h')}, {Colors.blue('--help')}    Show this help message")
     print(f"  {Colors.blue('--version')}     Print the package version and exit")
     print(f"  {Colors.blue('--cli')}         Show CLI and Python version info (including package version)")
-    print(f"  {Colors.blue('--llm-help')}         Show compact LLM-friendly help output")
+    print(f"  {Colors.blue('--llm-help')}    Show compact LLM-friendly help output")
     print(f"  {Colors.blue('--pdb')}         Drop into debugger on error")
     print(f"  {Colors.blue('--pip')}         Run pip for this CLI's Python environment")
     print(f"  {Colors.blue('--uv')}          Run uv targeting this CLI's Python environment")
     print(f"  {Colors.blue('--pyspy N')}     Profile for N seconds with py-spy (speedscope format)")
     print(f"  {Colors.blue('--raw')}         Print return value as-is (no JSON, no color)")
     print(f"  {Colors.blue('--full-traceback')} Show the full traceback including cliche wrapper frames")
-    print(f"  {Colors.blue('--skip-gen')}    Skip cache regeneration")
     print(f"  {Colors.blue('--timing')}      Show timing information")
 
 
@@ -1326,8 +1323,8 @@ def build_parser_for_function(func, enums=None, prog_name: str = "run.py", help_
     )
 
     # Add global CLI flags. Per-command help intentionally omits flags that
-    # only make sense at the top level (--version, --cli, --pip, --uv,
-    # --skip-gen) — those are listed by `<prog> --help` / `<prog> --llm-help`.
+    # only make sense at the top level (--version, --cli, --pip, --uv) —
+    # those are listed by `<prog> --help` / `<prog> --llm-help`.
     global_group = parser.add_argument_group('CLICHE OPTIONS')
     global_group.add_argument('-h', '--help', action='help', help='Show this help message')
     global_group.add_argument('--llm-help', action='store_true', help="Show this command's compact LLM-friendly help")
@@ -1705,7 +1702,7 @@ def invoke_function(func, parsed_args, enums=None, pydantic_binds=None):
         fn = getattr(module, func_name)
 
     # Global CLI args to exclude from function call
-    global_args = {'cli', 'pdb', 'pip', 'uv', 'pyspy', 'raw', 'full_traceback', 'timing', 'version', 'llm_help', 'skip_gen'}
+    global_args = {'cli', 'pdb', 'pip', 'uv', 'pyspy', 'raw', 'full_traceback', 'timing', 'version', 'llm_help'}
 
     # Convert parsed args to dict, excluding None values and global CLI args
     kwargs = {k: v for k, v in vars(parsed_args).items() if v is not None and k not in global_args}
@@ -2008,19 +2005,14 @@ def main():
     if pyspy_duration > 0:
         _start_pyspy(pyspy_duration)
 
-    # Check for --skip-gen flag (skip cache regeneration)
-    skip_gen = '--skip-gen' in sys.argv
-    if skip_gen:
-        sys.argv.remove('--skip-gen')
-
     # Check for --llm-help flag
     show_llm = '--llm-help' in sys.argv
     if show_llm:
         sys.argv.remove('--llm-help')
         CleanArgumentParser.llm_mode = True
 
-    # Regenerate cache if SOURCE_DIR is set and not skipping
-    if SOURCE_DIR and not skip_gen:
+    # Regenerate cache if SOURCE_DIR is set
+    if SOURCE_DIR:
         try:
             from cliche.main import scan_directory
         except ImportError:

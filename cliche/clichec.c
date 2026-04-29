@@ -877,7 +877,7 @@ static int render_command_llm(const jv *cache, const char *prog,
     fputs("## global options\n", out);
     fputs("--pdb: debugger on error | --pyspy N: profile Ns | --raw: plain output (no JSON/color)\n", out);
     fputs("--full-traceback: include cliche wrappers | --timing: timing info | --llm-help: this view\n", out);
-    fprintf(out, "# Top-level only (run on `%s` itself): --version, --cli, --pip, --uv, --skip-gen — see `%s --llm-help`\n",
+    fprintf(out, "# Top-level only (run on `%s` itself): --version, --cli, --pip, --uv — see `%s --llm-help`\n",
             prog, prog);
     return 0;
 }
@@ -950,21 +950,18 @@ static void render_top_help(const char *prog, CmdList *cmds) {
     if (cur) fputs(")\n", out);
 
     /* Strings copied verbatim from run.py:print_help so the parity test
-     * (tests/test_clichec_parity.py) catches drift. The irregular alignment
-     * on the `--llm-help` line (9 spaces of padding, not the canonical 4)
-     * is a faithful copy of Python's output, NOT a typo. */
+     * (tests/test_clichec_parity.py) catches drift. */
     fputs("\nCLICHE OPTIONS:\n", out);
     fprintf(out, "  %s-h%s, %s--help%s    Show this help message\n", B,R,B,R);
     fprintf(out, "  %s--version%s     Print the package version and exit\n", B,R);
     fprintf(out, "  %s--cli%s         Show CLI and Python version info (including package version)\n", B,R);
-    fprintf(out, "  %s--llm-help%s         Show compact LLM-friendly help output\n", B,R);
+    fprintf(out, "  %s--llm-help%s    Show compact LLM-friendly help output\n", B,R);
     fprintf(out, "  %s--pdb%s         Drop into debugger on error\n", B,R);
     fprintf(out, "  %s--pip%s         Run pip for this CLI's Python environment\n", B,R);
     fprintf(out, "  %s--uv%s          Run uv targeting this CLI's Python environment\n", B,R);
     fprintf(out, "  %s--pyspy N%s     Profile for N seconds with py-spy (speedscope format)\n", B,R);
     fprintf(out, "  %s--raw%s         Print return value as-is (no JSON, no color)\n", B,R);
     fprintf(out, "  %s--full-traceback%s Show the full traceback including cliche wrapper frames\n", B,R);
-    fprintf(out, "  %s--skip-gen%s    Skip cache regeneration\n", B,R);
     fprintf(out, "  %s--timing%s      Show timing information\n", B,R);
 }
 

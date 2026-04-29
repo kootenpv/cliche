@@ -487,7 +487,6 @@ Every installed CLI gets these for free:
 | `--pip [args]`  | Run `pip` in this CLI's Python env: `mytool --pip list`                |
 | `--pyspy N`     | Profile for N seconds, write speedscope JSON                           |
 | `--timing`      | Detailed startup + import + invoke timing to stderr                    |
-| `--skip-gen`    | Skip cache regeneration for this invocation                            |
 
 `--llm-help` is the canonical way for an LLM or script to enumerate your tool.
 Benchmark (`scripts/bench_llm_parsing.py`) shows Claude/Gemini/Codex generate

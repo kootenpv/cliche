@@ -2125,7 +2125,6 @@ description` lines are parsed into per-argument help text.
     --pip [args]      Run pip from the CLI's Python env (e.g. `mytool --pip list`)
     --pyspy N         Profile for N seconds, write speedscope JSON
     --timing          Print detailed startup / parse timings to stderr
-    --skip-gen        Skip cache regeneration this invocation
 
 Note: `mytool --llm-help` is the canonical way an LLM can discover every command,
 signature, default, and enum. Prefer it over `--help` for machine consumption.
