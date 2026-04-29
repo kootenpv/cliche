@@ -60,6 +60,21 @@ def _run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, check=check)
 
 
+def _tag_exists(tag: str) -> bool:
+    """True if `tag` already points at something locally.
+
+    Used by `cmd_deploy` to skip a redundant `git tag` when `bump --commit`
+    already created it. Without this, deploy would attempt the tag, git
+    would print `fatal: tag 'vX.Y.Z' already exists` to stderr, and the
+    user would see a scary-looking error in an otherwise successful run
+    (the `check=False` swallowed the failure but not the noise).
+    """
+    return subprocess.run(
+        ["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}"],
+        capture_output=True,
+    ).returncode == 0
+
+
 def _load_pypirc_token(section: str) -> tuple[str | None, str | None]:
     """Read ~/.pypirc and return (username, password) for the given section.
 
@@ -256,8 +271,13 @@ def cmd_deploy(args: argparse.Namespace) -> None:
 
     tag = f"v{version}"
     if not args.no_tag:
-        # Tolerate: tag may already exist if `bump --commit` created it.
-        _run(["git", "tag", tag], check=False)
+        # `bump --commit` may have already created this tag; pre-checking is
+        # quieter than letting `git tag` fail with a `fatal: ... already
+        # exists` line in the otherwise successful release log.
+        if _tag_exists(tag):
+            print(f"  tag {tag} already exists — skipping `git tag`")
+        else:
+            _run(["git", "tag", tag])
     if not args.no_push:
         _run(["git", "push"], check=False)
         _run(["git", "push", "origin", tag], check=False)

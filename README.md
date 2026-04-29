@@ -479,7 +479,7 @@ Every installed CLI gets these for free:
 | Flag            | What it does                                                           |
 |-----------------|------------------------------------------------------------------------|
 | `-h, --help`    | Standard help                                                          |
-| `--cli`         | CLI + Python version info, autocomplete status, cache location         |
+| `--cli`         | CLI + Python version info, autocomplete status, cache location, clichec build (paste this when reporting issues) |
 | `--llm-help`         | Compact LLM-friendly help: every command, signature, enum, default     |
 | `--raw`         | Plain `print()` of the return value — good for pipes                   |
 | `--full-traceback` | Include cliche-internal wrapper frames in the traceback (default trims them) |
@@ -666,6 +666,14 @@ The smaller the API, the less there is to learn and the less there is to
 break. `@cli` + `cliche install` + rich type coercion covers ~95% of the
 CLIs people actually build. The remaining 5% aren't blocked — they're just
 written the old way, alongside `@cli` functions in the same project.
+
+---
+
+## Reporting issues
+
+Run `<your-binary> --cli` (or `cliche --cli`) and paste the output —
+covers Python, cliche/clichec versions, shim type, and binary paths in
+one block.
 
 ---
 

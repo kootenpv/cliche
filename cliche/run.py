@@ -277,13 +277,59 @@ def _collect_cli_info(cache_path=None, pkg_name=None, install_dir=None) -> list:
     if shim:
         info.append(("Shim", shim))
     info.append(("Autocomplete enabled", str(autocomplete)))
+    clichec_ver, clichec_pth = _clichec_info()
     info.extend([
         ("Cliche version", _cliche_version()),
+        ("Cliche C version", clichec_ver),
+        ("Cliche C path", clichec_pth),
         ("Python Version", python_version),
         ("Python Interpreter", sys.executable),
         ("Python pip", f"{python_dir}/pip"),
     ])
     return info
+
+
+def _clichec_info() -> tuple[str, str]:
+    """Return `(version, path)` for the resolved clichec binary.
+
+    Both fields surface in the `--cli` table. Possible value pairs:
+      - ("0.22.2",   "/path/to/clichec")  binary present + reports version
+      - ("(unknown)","/path/to/clichec")  binary present but missing
+                                          --version (very old clichec)
+      - ("(error)",  "/path/to/clichec")  exec failed (corrupt binary,
+                                          wrong arch, OS killed it)
+      - ("(not built)", "(none)")         no bundled binary AND no cached
+                                          user-compile — clichec hasn't been
+                                          built on this host yet (would
+                                          compile on next `cliche install`
+                                          if a compiler is available)
+
+    Resolved once per call so `--cli` only forks subprocess + stats files
+    one time, not twice. Cheap (~1 ms exec on the C binary's --version path),
+    called only on interactive `--cli`. We don't cache the result because
+    `pip install --upgrade` between two `--cli` runs can swap the binary
+    out from under us.
+    """
+    try:
+        from cliche._clichec import _bundled_binary, _user_compile_target
+    except ImportError:
+        return ("(error)", "(error)")
+    binp = _bundled_binary()
+    if binp is None:
+        cached = _user_compile_target()
+        if cached.exists() and os.access(cached, os.X_OK):
+            binp = cached
+    if binp is None:
+        return ("(not built)", "(none)")
+    import subprocess
+    try:
+        r = subprocess.run([str(binp), "--version"],
+                           capture_output=True, text=True, timeout=2)
+        if r.returncode == 0 and r.stdout.strip():
+            return (r.stdout.strip(), str(binp))
+        return ("(unknown)", str(binp))
+    except (OSError, subprocess.TimeoutExpired):
+        return ("(error)", str(binp))
 
 
 def _docstring_style_summary(cache_path) -> str | None:
