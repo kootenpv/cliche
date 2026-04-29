@@ -114,7 +114,19 @@ def build(verbose: bool = False) -> Path | None:
             print("clichec: no C compiler found (set CC or install cc/gcc/clang)",
                   file=sys.stderr)
         return None
+    # Inject the cliche package version into the binary so `clichec
+    # --version` reports the same string as `pip show cliche`. Mirrors
+    # what scripts/build_one_wheel.sh does for wheel builds — this path
+    # covers users on the py3-none-any wheel who compile clichec
+    # themselves on first need. Falls back to "unknown" only if the
+    # `cliche` distribution metadata isn't installed yet (extremely
+    # unlikely since this code runs from inside the cliche package).
+    try:
+        from cliche import __version__ as _v
+    except ImportError:
+        _v = "unknown"
     cmd = [cc, "-std=c99", "-O2", "-Wall", "-Wextra",
+           f'-DCLICHEC_VERSION="{_v}"',
            "-o", str(out), str(src)]
     if verbose:
         print("clichec build:", " ".join(cmd), file=sys.stderr)

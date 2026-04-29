@@ -36,6 +36,16 @@ if [ -z "$PY" ]; then
     exit 2
 fi
 
+# Read the cliche package version from pyproject.toml and inject it into
+# clichec at compile time via -DCLICHEC_VERSION=...  This keeps the C
+# binary and the wheel's filename in lock-step automatically — every
+# `deploy.py bump` rewrites the same `version = "..."` line and the next
+# build picks it up. Falls back to "unknown" if the line is missing
+# (preserves the build-from-tarball case where pyproject might be stripped).
+VERSION=$(awk -F'"' '/^version *=/ {print $2; exit}' pyproject.toml)
+: "${VERSION:=unknown}"
+VERSION_FLAG="-DCLICHEC_VERSION=\"$VERSION\""
+
 PLATFORM="${1:-}"
 case "$PLATFORM" in
     linux-x86_64)
@@ -45,11 +55,13 @@ case "$PLATFORM" in
         # with old enough glibc"; we just opt out of the constraint entirely.
         TAG="manylinux2014_x86_64"
         CC_CMD=(cc -std=c99 -O2 -Wall -Wextra -static
+                "$VERSION_FLAG"
                 -o cliche/_bin/clichec cliche/clichec.c)
         ;;
     linux-aarch64)
         TAG="manylinux2014_aarch64"
         CC_CMD=(aarch64-linux-gnu-gcc -std=c99 -O2 -Wall -Wextra -static
+                "$VERSION_FLAG"
                 -o cliche/_bin/clichec cliche/clichec.c)
         ;;
     macos-arm64)
@@ -59,6 +71,7 @@ case "$PLATFORM" in
         TAG="macosx_11_0_arm64"
         CC_CMD=(cc -std=c99 -O2 -Wall -Wextra -arch arm64
                 -mmacosx-version-min=11.0
+                "$VERSION_FLAG"
                 -o cliche/_bin/clichec cliche/clichec.c)
         ;;
     *)

@@ -38,6 +38,19 @@
 #define DEFER 64
 #define EXPECTED_CACHE_VERSION "2.2"
 
+/* Cliche package version this binary was compiled against. Inherited from
+ * pyproject.toml at build time via `-DCLICHEC_VERSION=...` (set by
+ * scripts/build_one_wheel.sh from the same `version = ...` line that
+ * `uv version --bump` rewrites in deploy.py). Falling back to "unknown"
+ * keeps a hand-compile (`cliche._clichec.build()` on a host with no
+ * wheel) working — the only surface this exposes is the diagnostic
+ * `clichec --version` print, not a correctness gate. The actual
+ * schema-mismatch detection lives on the cache side via the
+ * `cliche_version` field that runtime.py stamps. */
+#ifndef CLICHEC_VERSION
+#define CLICHEC_VERSION "unknown"
+#endif
+
 /* ============================================================
  *                  portable mtime accessor
  * ============================================================
@@ -1934,6 +1947,16 @@ static int do_complete(CmdList *cmds, Arena *a, const jv *enums_for_complete) {
 }
 
 int main(int argc, char **argv) {
+    /* Diagnostic shortcut: `clichec --version` prints the cliche package
+     * version this binary was compiled against and exits 0. Doesn't go
+     * through the wrapper (which always passes `<cache> <pkg> ...`) so
+     * argv[1] is the version flag here, not a cache path. Useful when
+     * a user reports "fast-launch is broken" — `clichec --version`
+     * tells you whether they're running a stale binary. */
+    if (argc == 2 && strcmp(argv[1], "--version") == 0) {
+        puts(CLICHEC_VERSION);
+        return 0;
+    }
     if (argc < 3) return DEFER;
     detect_colors();
     const char *cache_path = argv[1];
