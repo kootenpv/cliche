@@ -27,6 +27,14 @@ import pytest
 
 BINARY_NAME = "nc_test_bin"  # unique so it can't collide with real tools
 
+# Tool-level blurb baked into the `main` fixture's pyproject.toml after
+# `cliche install` generates it. Distinctive enough to grep for in --help and
+# --llm-help parity tests; the C and Python launchers must surface it
+# identically (both pull it from the cache as `description`).
+PARITY_PYPROJECT_DESCRIPTION = (
+    "Cliche test fixture — exercises the help/llm-help/parity surfaces."
+)
+
 
 @pytest.fixture(autouse=True)
 def reset_raw_mode():
@@ -343,6 +351,18 @@ def real_installs(tmp_path_factory, _background_warmups) -> Iterator[dict]:
                 f"{name} pyproject generation failed ({result.returncode}):\n"
                 f"stdout: {result.stdout}\nstderr: {result.stderr}"
             )
+
+    # Inject a [project].description into the `main` fixture's pyproject so
+    # the parity warmup primes a cache that carries it. test_clichec_parity
+    # asserts both renderers surface this line identically.
+    main_pyproject = workdirs["main"] / "pyproject.toml"
+    main_pyproject.write_text(
+        main_pyproject.read_text().replace(
+            'version = "0.1.0"',
+            f'version = "0.1.0"\ndescription = "{PARITY_PYPROJECT_DESCRIPTION}"',
+            1,
+        )
+    )
 
     # Phase 2: ONE pip install -e for every workdir.
     uv_path = shutil.which("uv")

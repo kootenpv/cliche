@@ -107,6 +107,54 @@ def test_freshness_add_new_file_in_same_dir(freshness_env):
     assert json.loads(r.stdout) == {"v": 3}
 
 
+def test_freshness_pyproject_description_updates(freshness_env, real_installs):
+    """Mutating [project].description in pyproject.toml must invalidate the
+    cached `description` field on the next invocation. Covers both halves of
+    the plumbing: cache field gets populated from pyproject, and an mtime
+    bump re-reads to pick up the new value."""
+    binary, pkg_dir = freshness_env
+    work = real_installs["freshness"]["work"]
+    pyproject = work / "pyproject.toml"
+
+    initial = pyproject.read_text()
+    pyproject.write_text(
+        initial.replace(
+            'version = "0.1.0"',
+            'version = "0.1.0"\ndescription = "freshness initial blurb"',
+            1,
+        )
+    )
+    _bump_mtime(pyproject)
+
+    r = _run(binary, "--help")
+    assert "freshness initial blurb" in r.stdout, (
+        f"initial description not rendered:\n{r.stdout}"
+    )
+
+    # Read cache to confirm the pyproject_mtime/description plumbing landed.
+    cache_dir = Path(os.environ.get("XDG_CACHE_HOME") or
+                     os.path.expanduser("~/.cache")) / "cliche"
+    cache_files = list(cache_dir.glob(f"{PKG_NAME}_*.json"))
+    assert cache_files, f"no cache file under {cache_dir}"
+    cache = json.loads(cache_files[0].read_text())
+    assert cache.get("description") == "freshness initial blurb"
+    assert isinstance(cache.get("pyproject_mtime"), (int, float))
+
+    # Bump description; mtime drift must trigger a re-read.
+    pyproject.write_text(
+        pyproject.read_text().replace(
+            "freshness initial blurb", "freshness updated blurb"
+        )
+    )
+    _bump_mtime(pyproject)
+
+    r = _run(binary, "--help")
+    assert "freshness updated blurb" in r.stdout, (
+        f"updated description not picked up:\n{r.stdout}"
+    )
+    assert "freshness initial blurb" not in r.stdout
+
+
 def test_freshness_add_subpackage(freshness_env):
     """A new subdirectory with __init__.py + a @cli-bearing module must be
     picked up the same way — the rescan walks the whole package tree."""

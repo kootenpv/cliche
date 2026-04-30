@@ -142,6 +142,53 @@ def _parse_cli_funcs(full_path: str, rel_path: str, package_name: str = ""):
     }
 
 
+_PYPROJECT_PROJECT_RE = re.compile(r'^\[project\]\s*$', re.MULTILINE)
+_PYPROJECT_DESC_RE = re.compile(
+    r'^\s*description\s*=\s*(["\'])(.*?)\1\s*$',
+    re.MULTILINE,
+)
+
+
+def _extract_project_description(content: str) -> str | None:
+    """Pull `[project].description` (single-line string) from pyproject TOML.
+
+    Conservative single-line match — multi-line strings aren't supported, but
+    the canonical PyPI form is `description = "Short summary"` which is what
+    nearly every project uses. Worth avoiding tomllib here: stdlib only since
+    3.11, and a regex over a sub-1KB section is sub-microsecond.
+    """
+    m = _PYPROJECT_PROJECT_RE.search(content)
+    if not m:
+        return None
+    section = content[m.end():]
+    next_section = re.search(r'^\[', section, re.MULTILINE)
+    if next_section:
+        section = section[:next_section.start()]
+    desc = _PYPROJECT_DESC_RE.search(section)
+    return desc.group(2) if desc else None
+
+
+def _read_pyproject_meta(pkg_dir: Path) -> tuple[str | None, float | None]:
+    """Locate pyproject.toml and return (description, mtime).
+
+    Tries `pkg_dir/pyproject.toml` (flat layout) then `pkg_dir.parent/pyproject.toml`
+    (subdir layout). Returns (None, None) when neither exists. Returns
+    (None, mtime) when pyproject exists but has no [project].description so
+    the caller still sees the mtime change and re-checks on next run.
+    """
+    for candidate in (pkg_dir / "pyproject.toml", pkg_dir.parent / "pyproject.toml"):
+        try:
+            mtime = os.stat(candidate).st_mtime
+        except OSError:
+            continue
+        try:
+            content = candidate.read_text()
+        except OSError:
+            return None, mtime
+        return _extract_project_description(content), mtime
+    return None, None
+
+
 def _get_all_py_files(directory: Path) -> dict[str, float]:
     """Get all .py files respecting skip dirs."""
     py_files, _ = _walk_tree(directory)
@@ -447,6 +494,17 @@ def _scan_and_cache(pkg_dir: Path, cache_file: Path, package_name: str = "", sho
     cache.pop("py_enum_cache", None)
     cache["last_scan"] = time.time()
 
+    # Pyproject description: cached, refreshed only when mtime drifts. Stat is
+    # microseconds; the regex parse only fires on actual change. Stored under
+    # top-level keys so clichec can read description directly without parsing
+    # any TOML, and revalidate via pyproject_mtime in its freshness check.
+    old_pyproject_mtime = cache.get("pyproject_mtime")
+    desc, pyproject_mtime = _read_pyproject_meta(pkg_dir)
+    pyproject_changed = pyproject_mtime != old_pyproject_mtime
+    if pyproject_changed:
+        cache["pyproject_mtime"] = pyproject_mtime
+        cache["description"] = desc
+
     # Write cache if anything changed (including first run that just populated
     # dir_mtimes — without persisting, the fast path would never kick in).
     # Atomic: write to a sibling temp file and os.replace() it onto the target
@@ -459,7 +517,7 @@ def _scan_and_cache(pkg_dir: Path, cache_file: Path, package_name: str = "", sho
     # commands defined in newly-added files instead of deferring to Python.
     dirs_drifted = (not fast_path) and current_dir_mtimes != old_dir_mtimes
     if (changed_files or deleted_files or new_py_files or pb2_changed
-            or dirs_newly_tracked or dirs_drifted):
+            or dirs_newly_tracked or dirs_drifted or pyproject_changed):
         cache_file_path = Path(cache_file)
         tmp_path = cache_file_path.with_suffix(cache_file_path.suffix + f".tmp.{os.getpid()}")
         try:

@@ -639,7 +639,8 @@ def format_function_llm(func: dict, include_docstring: bool = True) -> str:
 def print_llm_output(commands: dict, subcommands: dict, enums: dict,
                      filter_cmd: str = None, include_docstrings: bool = True,
                      prog_name: str = "run.py", install_dir: str = None, cwd: str = None,
-                     output_format: str = "lines", cache_path=None, pkg_name=None):
+                     output_format: str = "lines", cache_path=None, pkg_name=None,
+                     description: str | None = None):
     """Print compact LLM-friendly output."""
     from datetime import datetime, timezone
     timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -655,17 +656,17 @@ def print_llm_output(commands: dict, subcommands: dict, enums: dict,
     if output_format == "json":
         _print_llm_output_json(commands, subcommands, enums, filter_cmd,
                                include_docstrings, prog_name, install_dir, cwd, timestamp,
-                               env_info)
+                               env_info, description)
     else:
         _print_llm_output_lines(commands, subcommands, enums, filter_cmd,
                                 include_docstrings, prog_name, install_dir, cwd, timestamp,
-                                env_info)
+                                env_info, description)
 
 
 def _print_llm_output_json(commands: dict, subcommands: dict, enums: dict,
                            filter_cmd: str, include_docstrings: bool,
                            prog_name: str, install_dir: str, cwd: str, timestamp: str,
-                           env_info: list = None):
+                           env_info: list = None, description: str | None = None):
     """Print LLM output in minified JSON format."""
     output = {
         '_': (
@@ -693,6 +694,8 @@ def _print_llm_output_json(commands: dict, subcommands: dict, enums: dict,
         'fn': {},
         'E': {},
     }
+    if description:
+        output['description'] = description
 
     # Process commands (ungrouped functions)
     ungrouped = []
@@ -740,11 +743,13 @@ def _print_llm_output_json(commands: dict, subcommands: dict, enums: dict,
 def _print_llm_output_lines(commands: dict, subcommands: dict, enums: dict,
                             filter_cmd: str, include_docstrings: bool,
                             prog_name: str, install_dir: str, cwd: str, timestamp: str,
-                            env_info: list = None):
+                            env_info: list = None, description: str | None = None):
     """Print LLM output in line-based format (~10% fewer tokens than JSON)."""
     lines = []
 
     # Header with full instructions
+    if description:
+        lines.append(f"# description: {description}")
     lines.append(f"# {prog_name} CLI - Run: {prog_name} <cmd> [args] (space-separated)")
     lines.append(f"# Syntax: fn(pos:Type, opt?:Type=default). No ? = positional arg. ? = optional --flag value.")
     lines.append(f"# Bool flags shown as --flag or --no-flag (use as-is to toggle). Lists/tuples/sets/frozensets: --items a b c (space-separated; set/frozenset dedupe + unordered).")
@@ -877,9 +882,11 @@ def print_llm_command_help(func: dict, prog_name: str, cmd: str, group: str = No
 
 
 
-def print_help(commands, subcommands, prog_name: str = "run.py"):
+def print_help(commands, subcommands, prog_name: str = "run.py", description: str | None = None):
     """Print help similar to 1one --help."""
     print(f"{Colors.blue(f'usage: {prog_name} [-h] [--llm-help] [--pdb] [--pip] [--uv] [--pyspy N] [--timing] COMMAND ...')}\n")
+    if description:
+        print(f"{description}\n")
     print("COMMANDS:")
     for name in sorted(commands.keys()):
         doc = get_docstring_first_line(commands[name])
@@ -2175,12 +2182,14 @@ def main():
     if show_llm and (len(sys.argv) < 2 or sys.argv[1] in ('-h', '--help')):
         print_llm_output(commands, subcommands, enums, prog_name=prog_name,
                          install_dir=INSTALL_DIR, cwd=os.getcwd(),
-                         cache_path=CACHE_PATH, pkg_name=PKG_NAME)
+                         cache_path=CACHE_PATH, pkg_name=PKG_NAME,
+                         description=data.get("description"))
         return
 
     # Parse command from argv
     if len(sys.argv) < 2 or sys.argv[1] in ('-h', '--help'):
-        print_help(commands, subcommands, prog_name=prog_name)
+        print_help(commands, subcommands, prog_name=prog_name,
+                   description=data.get("description"))
         if show_timing:
             print(f"timing total (help): {(time.time() - t0)*1000:.1f}ms", file=sys.stderr)
         return

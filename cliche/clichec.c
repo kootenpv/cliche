@@ -581,6 +581,39 @@ static int cache_is_fresh(const jv *cache, const char *pkg_dir) {
         }
     }
 
+    /* pyproject.toml mtime — cached when runtime.py reads [project].description
+     * for the top-level help blurb. We must defer to Python on drift so the
+     * description (and the cache itself) get refreshed. Two candidate paths
+     * mirror runtime.py:_read_pyproject_meta: pkg_dir/pyproject.toml (flat
+     * layout) and pkg_dir/../pyproject.toml (subdir layout). Whichever exists
+     * with a matching mtime wins. Missing field on older caches: skip the
+     * check (backwards-compatible). */
+    const jv *ppm = jv_obj_get(cache, "pyproject_mtime");
+    if (ppm && ppm->kind == JV_NUM) {
+        double want = ppm->u.n;
+        const char *paths[2] = { NULL, NULL };
+        char p1[4096], p2[4096];
+        if (snprintf(p1, sizeof(p1), "%s/pyproject.toml", pkg_dir) < (int)sizeof(p1))
+            paths[0] = p1;
+        if (snprintf(p2, sizeof(p2), "%s/../pyproject.toml", pkg_dir) < (int)sizeof(p2))
+            paths[1] = p2;
+        int matched = 0;
+        for (int i = 0; i < 2 && !matched; i++) {
+            if (!paths[i]) continue;
+            struct stat st;
+            if (stat(paths[i], &st) != 0) continue;
+            double cur = (double)st.st_mtime + ST_MTIM_NSEC(st) / 1e9;
+            double diff = cur - want;
+            if (diff < 0) diff = -diff;
+            if (diff <= 0.001) matched = 1;
+        }
+        if (!matched) {
+            if (getenv("CLICHEC_DEBUG"))
+                fprintf(stderr, "clichec: pyproject mtime drift (want=%.6f)\n", want);
+            return 0;
+        }
+    }
+
     /* Tracked directories — keys are relative paths ("." for the package
      * root, "sub" for a subpackage, etc.). A drift here indicates a file
      * has been added/removed in that dir, so the cache may not know about
@@ -905,12 +938,22 @@ static const char *first_doc_line(const jv *fn) {
     return d->u.str.s; /* caller stops at \n */
 }
 
-static void render_top_help(const char *prog, CmdList *cmds) {
+static void render_top_help(const char *prog, CmdList *cmds, const jv *cache) {
     FILE *out = stdout;
     const char *B = blue_on(color_out), *R = reset_on(color_out);
     fprintf(out,
         "%susage: %s [-h] [--llm-help] [--pdb] [--pip] [--uv] [--pyspy N] [--timing] COMMAND ...%s\n\n",
         B, prog, R);
+    /* [project].description from pyproject.toml — runtime.py caches it under
+     * the top-level "description" key. Mirrors run.py:print_help: one line
+     * + blank line, only when present and non-empty. */
+    if (cache) {
+        const jv *desc = jv_obj_get(cache, "description");
+        if (desc && desc->kind == JV_STR && desc->u.str.l > 0) {
+            fwrite(desc->u.str.s, 1, desc->u.str.l, out);
+            fputs("\n\n", out);
+        }
+    }
     fputs("COMMANDS:\n", out);
     for (size_t i = 0; i < cmds->n; i++) {
         if (cmds->items[i].group) continue;
@@ -2053,11 +2096,11 @@ int main(int argc, char **argv) {
     /* dispatch */
     int rc = DEFER;
     if (uargc == 0) {
-        render_top_help(prog, &cmds);
+        render_top_help(prog, &cmds, &root);
         rc = 0;
     } else if (uargc == 1 &&
                (strcmp(uargv[0], "-h") == 0 || strcmp(uargv[0], "--help") == 0)) {
-        render_top_help(prog, &cmds);
+        render_top_help(prog, &cmds, &root);
         rc = 0;
     } else if (uargc == 1 && strcmp(uargv[0], "--llm-help") == 0) {
         /* Top-level --llm-help embeds an env snapshot (Python version,

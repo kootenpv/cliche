@@ -360,6 +360,22 @@ def test_clichec_matches_python(parity_results, test_id, argv):
     )
 
 
+def test_pyproject_description_renders_in_both(parity_results):
+    """[project].description from pyproject.toml must appear in --help from
+    both renderers. The byte-parity test (`top_help_long`) catches drift, but
+    this one fails fast with a clear message if the description plumbing
+    breaks on either side, instead of producing a confusing diff."""
+    from conftest import PARITY_PYPROJECT_DESCRIPTION
+    py = parity_results[("py", "top_help_long")]
+    c  = parity_results[("c",  "top_help_long")]
+    assert PARITY_PYPROJECT_DESCRIPTION in py.stdout, (
+        f"python --help missing description:\n{py.stdout}"
+    )
+    assert PARITY_PYPROJECT_DESCRIPTION in c.stdout, (
+        f"clichec --help missing description:\n{c.stdout}"
+    )
+
+
 @pytest.mark.parametrize("test_id,argv,must_contain",
                          CONTENT_PARITY_ARGV,
                          ids=[t[0] for t in CONTENT_PARITY_ARGV])

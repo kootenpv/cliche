@@ -391,6 +391,11 @@ flag hints, type markers, and defaults so users can scan it fast:
 
 ![rendered help output](https://raw.githubusercontent.com/kootenpv/cliche/master/resources/cliche_rendered.png)
 
+**Tool-level blurb.** Set `description = "..."` under `[project]` in your
+`pyproject.toml` and it renders one line below `usage:` in `--help` (and a
+`# description:` line in `--llm-help`). Cached and re-read only on pyproject
+mtime drift.
+
 ## Returning vs printing
 
 - Non-`None` return → auto-printed as `json.dumps(result, indent=2)`. With
