@@ -24,6 +24,9 @@ class Priority(IntEnum):
     HIGH = 10
 
 
+RuntimeDatum = Enum("RuntimeDatum", ["TRADE", "QUOTE"])
+
+
 class Config(BaseModel):
     host: str
     port: int = 8080
@@ -109,6 +112,12 @@ def echo_int_enum_default(level: Priority = Priority.MEDIUM):
     """IntEnum default written in qualified form — must be converted to
     the real enum member before the function runs (same path as Enum)."""
     return {"name": level.name, "value": int(level)}
+
+
+@cli
+def echo_runtime_enum(datums: tuple[RuntimeDatum, ...]):
+    """Runtime-created Enum(...) members should still be converted."""
+    return {"names": [datum.name for datum in datums]}
 
 
 # ---------- pydantic ----------

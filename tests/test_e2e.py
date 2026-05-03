@@ -116,6 +116,13 @@ def test_echo_int_enum_default_overridden_by_flag(cli_results):
     assert _data(cli_results, "intenum_default_set") == {"name": "LOW", "value": 1}
 
 
+def test_runtime_created_enum_tuple_converts(cli_results):
+    """Regression: `RuntimeDatum = Enum("RuntimeDatum", ...)` is not a
+    statically declared enum class, but tuple[RuntimeDatum, ...] still needs
+    real enum members at invocation time."""
+    assert _data(cli_results, "runtime_enum_tuple") == {"names": ["TRADE", "QUOTE"]}
+
+
 # ---------- Path coercion ----------
 
 def test_echo_path_is_real_path_instance(cli_results):

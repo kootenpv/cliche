@@ -1664,10 +1664,47 @@ def find_enum_class(func_module, enum_name):
     return None
 
 
+def _enum_names_for_annotation(annotation: str, enums: dict, func_module: str):
+    """Yield enum names referenced by an annotation.
+
+    The cache contains statically-declared ``class Color(Enum)`` enums, but
+    some projects create enum classes dynamically with ``Enum("Name", ...)``.
+    Those cannot always be enumerated safely from source text, so resolve
+    identifier-looking annotation parts against the already-imported function
+    module as a runtime fallback.
+    """
+    seen = set()
+    for enum_name in enums.keys():
+        if enum_name in annotation:
+            seen.add(enum_name)
+            yield enum_name
+
+    try:
+        import enum as _enum
+    except Exception:
+        _enum = None
+
+    for name in re.findall(r'\b[A-Za-z_][A-Za-z0-9_]*\b', annotation):
+        if name in seen:
+            continue
+        enum_cls = find_enum_class(func_module, name)
+        if enum_cls is None:
+            continue
+        if _enum is not None:
+            try:
+                if not (isinstance(enum_cls, type) and issubclass(enum_cls, _enum.Enum)):
+                    continue
+            except TypeError:
+                continue
+        seen.add(name)
+        yield name
+
+
 def convert_enum_args(func, kwargs, enums):
     """Convert string enum values to actual enum values."""
     params = {p['name']: p for p in func.get('parameters', [])}
     func_module = func.get('module', '')
+    enums = enums or {}
 
     for key, value in list(kwargs.items()):
         param = params.get(key)
@@ -1678,47 +1715,48 @@ def convert_enum_args(func, kwargs, enums):
         if not annotation:
             continue
 
-        # Check if this param uses an enum type
-        for enum_name in enums.keys():
-            if enum_name in annotation:
-                enum_cls = find_enum_class(func_module, enum_name)
-                if enum_cls is None:
-                    continue
+        # Check if this param uses an enum type. Statically-scanned enums come
+        # from ``enums``; runtime-created enum classes are resolved from the
+        # function module by _enum_names_for_annotation.
+        for enum_name in _enum_names_for_annotation(annotation, enums, func_module):
+            enum_cls = find_enum_class(func_module, enum_name)
+            if enum_cls is None:
+                continue
 
-                # Strip any `Enum.` prefix coming from a source-parsed default
-                # literal (e.g. `color: Color = Color.RED` stores the default
-                # as the string "Color.RED", which would otherwise fail
-                # getattr and silently leave a str where an enum is expected).
-                # User-supplied argparse values are already bare member names,
-                # so the strip is a no-op in that case. Guarding isinstance
-                # also makes the list branch safe against already-converted
-                # enum members.
-                def _to_member(v):
-                    return v.split('.')[-1] if isinstance(v, str) else v
-                try:
-                    # Collection-of-enums: argparse hands back a list, but a
-                    # source-parsed default literal like `tuple[E, ...] = (E.A, E.B)`
-                    # arrives as a tuple already. Accept either and normalize
-                    # to the container type that matches the annotation so the
-                    # user function receives exactly what its signature says.
-                    if isinstance(value, (list, tuple)):
-                        ann_lstrip = annotation.lstrip()
-                        if ann_lstrip.startswith("tuple") or ann_lstrip.startswith("Tuple"):
-                            container = tuple
-                        elif ann_lstrip.startswith("frozenset") or ann_lstrip.startswith("FrozenSet"):
-                            container = frozenset
-                        elif ann_lstrip.startswith("set") or ann_lstrip.startswith("Set"):
-                            container = set
-                        else:
-                            container = list
-                        kwargs[key] = container(
-                            getattr(enum_cls, _to_member(v)) for v in value
-                        )
+            # Strip any `Enum.` prefix coming from a source-parsed default
+            # literal (e.g. `color: Color = Color.RED` stores the default
+            # as the string "Color.RED", which would otherwise fail
+            # getattr and silently leave a str where an enum is expected).
+            # User-supplied argparse values are already bare member names,
+            # so the strip is a no-op in that case. Guarding isinstance
+            # also makes the list branch safe against already-converted
+            # enum members.
+            def _to_member(v):
+                return v.split('.')[-1] if isinstance(v, str) else v
+            try:
+                # Collection-of-enums: argparse hands back a list, but a
+                # source-parsed default literal like `tuple[E, ...] = (E.A, E.B)`
+                # arrives as a tuple already. Accept either and normalize
+                # to the container type that matches the annotation so the
+                # user function receives exactly what its signature says.
+                if isinstance(value, (list, tuple)):
+                    ann_lstrip = annotation.lstrip()
+                    if ann_lstrip.startswith("tuple") or ann_lstrip.startswith("Tuple"):
+                        container = tuple
+                    elif ann_lstrip.startswith("frozenset") or ann_lstrip.startswith("FrozenSet"):
+                        container = frozenset
+                    elif ann_lstrip.startswith("set") or ann_lstrip.startswith("Set"):
+                        container = set
                     else:
-                        kwargs[key] = getattr(enum_cls, _to_member(value))
-                except AttributeError:
-                    pass  # Keep original value if conversion fails
-                break
+                        container = list
+                    kwargs[key] = container(
+                        getattr(enum_cls, _to_member(v)) for v in value
+                    )
+                else:
+                    kwargs[key] = getattr(enum_cls, _to_member(value))
+            except AttributeError:
+                pass  # Keep original value if conversion fails
+            break
 
     return kwargs
 
@@ -1792,9 +1830,10 @@ def invoke_function(func, parsed_args, enums=None, pydantic_binds=None):
                       file=sys.stderr)
                 sys.exit(2)
 
-    # Convert enum string values to actual enum values
-    if enums:
-        kwargs = convert_enum_args(func, kwargs, enums)
+    # Convert enum string values to actual enum values. Run even when the
+    # static enum cache is empty so runtime-created Enum(...) classes still
+    # convert based on the live function module.
+    kwargs = convert_enum_args(func, kwargs, enums)
 
     # Non-enum container coercion: argparse always collects nargs='+'/'*' into
     # a list, but the user's function may be annotated with set / frozenset /
@@ -2379,4 +2418,3 @@ def _suggest_command(cmd: str, commands: dict, subcommands: dict,
 
 if __name__ == '__main__':
     main()
-

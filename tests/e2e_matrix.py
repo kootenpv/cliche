@@ -29,6 +29,7 @@ E2E_ARGV_MATRIX: dict[str, list[str]] = {
     "intenum_bad":          ["echo-int-enum", "URGENT"],
     "intenum_default":      ["echo-int-enum-default"],
     "intenum_default_set":  ["echo-int-enum-default", "--level", "LOW"],
+    "runtime_enum_tuple":   ["echo-runtime-enum", "TRADE", "QUOTE"],
 
     # Path coercion + container element coercion
     "path_single":        ["echo-path", "/etc/passwd"],
