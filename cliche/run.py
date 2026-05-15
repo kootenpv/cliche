@@ -964,6 +964,14 @@ def _parse_dict_annotation(annotation: str | None) -> tuple | None:
     if not annotation:
         return None
     s = annotation.strip()
+    # Unwrap Optional[...] and PEP 604 `... | None` / `None | ...` so that
+    # `dict[str, int] | None` still resolves to the inner dict.
+    if s.startswith('Optional[') and s.endswith(']'):
+        s = s[len('Optional['):-1].strip()
+    if ' | ' in s:
+        parts = [p.strip() for p in s.split(' | ') if p.strip() != 'None']
+        if len(parts) == 1:
+            s = parts[0]
     # Match dict[K, V] AND dict[(K, V)] — the AST expr_to_string wraps a
     # subscript-tuple slice in parens, so `dict[str, int]` in source becomes
     # the string `dict[(str, int)]` after unparse. Tolerate both.

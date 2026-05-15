@@ -359,6 +359,15 @@ class TestParseDictAnnotation:
         # AST-unparse form.
         assert _parse_dict_annotation("dict[(str, Path)]") == (str, Path)
 
+    def test_optional_pep604_unwrap(self):
+        # `dict[str, str] | None = None` is a common signature; the union
+        # wrapper must not block dict detection.
+        assert _parse_dict_annotation("dict[str, str] | None") == (str, str)
+        assert _parse_dict_annotation("None | dict[str, int]") == (str, int)
+
+    def test_optional_typing_unwrap(self):
+        assert _parse_dict_annotation("Optional[dict[str, int]]") == (str, int)
+
 
 class TestDictAction:
     """Build a real argparse parser and exercise the action end-to-end."""
