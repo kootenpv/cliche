@@ -146,6 +146,8 @@ def _make_launcher(pkg: str):
         # read), and once succeeded the function isn't entered again — the
         # next invocation goes straight to clichec.
         _maybe_self_upgrade_shim(pkg)
+        from cliche.proctitle import set_cli_process_title
+        set_cli_process_title()
         # Self-alias: `cliche install sdm -p cliche` registers `sdm` as an
         # alternate binary name for cliche itself. Scanning cliche's package
         # for `@cli` decorators would find none (cliche's real entry is the
