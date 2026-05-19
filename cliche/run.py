@@ -1886,71 +1886,57 @@ def invoke_function(func, parsed_args, enums=None, pydantic_binds=None):
 
 
 def _start_pyspy(duration):
-    """Spawn py-spy in a background process to profile the current PID for `duration` seconds.
+    """Re-exec the current process under `py-spy record`, with py-spy as the
+    parent. py-spy then spawns the Python process as a child, profiles for
+    `duration` seconds, and writes a speedscope JSON.
 
-    When py-spy's duration expires, it SIGKILL's the parent process and prints
-    a clear summary for LLM consumption.
+    This avoids the previous "py-spy as child trying to ptrace its parent"
+    pattern, which silently fails on any Linux host with
+    `kernel.yama.ptrace_scope >= 1` (Arch/Ubuntu/Debian defaults).
 
-    Returns the output file path, or None if py-spy is not available.
+    Never returns on success (execvp replaces the process); returns None if
+    py-spy isn't installed or the entrypoint can't be resolved.
     """
     import shutil
-    import subprocess
     import tempfile
 
     if not shutil.which('py-spy'):
         print("warning: py-spy not found, skipping profiling (pip install py-spy)", file=sys.stderr)
         return None
 
-    parent_pid = os.getpid()
-    out_file = tempfile.mktemp(suffix='.json', prefix='pyspy_')
-    print(f"[pyspy] started: PID={parent_pid} duration={duration}s output={out_file}", file=sys.stderr)
-
-    # Wrapper script: run py-spy, print result, then SIGKILL the parent
-    import textwrap
-    wrapper = textwrap.dedent(f"""\
-        import subprocess, sys, os, signal, time
-        subprocess.run(
-            ['py-spy', 'record', '-o', '{out_file}', '--pid', '{parent_pid}',
-             '--duration', '{duration}', '--native', '--format', 'speedscope'],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        # Print result BEFORE killing the parent
-        if os.path.exists('{out_file}'):
-            size = os.path.getsize('{out_file}')
-            print(f"[pyspy] done: output={out_file} size={{size}} bytes", file=sys.stderr)
-            print(f"[pyspy] view: https://www.speedscope.app/ (load {out_file})", file=sys.stderr)
+    # sys.argv at this point already has `--pyspy N` stripped (by the caller),
+    # so re-executing won't loop back into this function. argv[0] is normally
+    # the entrypoint path; under the fast-shim Python fallback it is "-c", in
+    # which case resolve to the actual installed binary.
+    argv = list(sys.argv)
+    if argv and os.path.basename(argv[0]) == "-c":
+        resolved, _ = _resolve_binary(PKG_NAME)
+        if resolved:
+            argv[0] = resolved
         else:
-            print("[pyspy] error: no output file produced", file=sys.stderr)
-        sys.stderr.flush()
-        time.sleep(0.1)
-        # SIGKILL the parent — SIGTERM may be caught/ignored by long-running commands
-        try:
-            os.kill({parent_pid}, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    """)
+            print("warning: --pyspy could not resolve entrypoint, skipping", file=sys.stderr)
+            return None
 
-    proc = subprocess.Popen(
-        [sys.executable, '-c', wrapper],
-        stdout=subprocess.DEVNULL, stderr=None,  # inherit stderr so prints are visible
-    )
-
-    # Register cleanup so py-spy is terminated if the main process exits before duration
-    import atexit
-    def _cleanup():
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-        if os.path.exists(out_file):
-            size = os.path.getsize(out_file)
-            print(f"[pyspy] done: output={out_file} size={size} bytes", file=sys.stderr)
-            print(f"[pyspy] view: https://www.speedscope.app/ (load {out_file})", file=sys.stderr)
-    atexit.register(_cleanup)
-
-    return out_file
+    out_file = tempfile.mktemp(suffix='.json', prefix='pyspy_')
+    # Don't prepend sys.executable: argv[0] may be a shell-shim (cliche's
+    # fast-shim) or a Python entry-point script with its own shebang. Letting
+    # the OS resolve the shebang works for both. --subprocesses ensures py-spy
+    # follows shell→python execs.
+    cmd = [
+        'py-spy', 'record',
+        '-o', out_file,
+        '-f', 'speedscope',
+        '-d', str(duration),
+        '--native',
+        '--subprocesses',
+        '--',
+        *argv,
+    ]
+    print(f"[pyspy] re-exec under py-spy: duration={duration}s output={out_file}", file=sys.stderr)
+    print(f"[pyspy] view when done: https://www.speedscope.app/ (load {out_file})", file=sys.stderr)
+    sys.stderr.flush()
+    os.execvp('py-spy', cmd)
+    # unreachable: execvp replaced the process image
 
 
 def main():
