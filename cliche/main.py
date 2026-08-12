@@ -263,9 +263,65 @@ def _lazy_arg_from_default_expr(node: ast.expr):
     return None
 
 
-def extract_parameters(args: ast.arguments) -> list[dict]:
-    """Extract parameter information from function arguments."""
+def collect_module_constants(tree: ast.Module) -> dict:
+    """Map module-level constant names to their value AST node.
+
+    Only top-level ``NAME = <literal>`` / ``NAME: T = <literal>`` assignments
+    are recorded, where ``<literal>`` is something we can represent statically
+    (a Constant, a unary-signed Constant, or a list/tuple/dict of those, plus
+    lazy-arg calls like ``DateArg("today")``). This lets a default written as a
+    bare constant name — ``timeout: float = DEFAULT_TIMEOUT`` — be resolved to
+    its literal value WITHOUT importing or executing the user module.
+
+    Names assigned more than once are dropped (ambiguous), and so are names
+    bound to non-literal expressions (function calls we don't recognise,
+    comprehensions, other names, etc.).
+    """
+    constants: dict = {}
+    seen = set()
+
+    def _is_static(node: ast.expr) -> bool:
+        if isinstance(node, ast.Constant):
+            return True
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+            return _is_static(node.operand)
+        if isinstance(node, (ast.List, ast.Tuple)):
+            return all(_is_static(e) for e in node.elts)
+        if isinstance(node, ast.Dict):
+            return all(k is not None and _is_static(k) for k in node.keys) and all(
+                _is_static(v) for v in node.values
+            )
+        if _lazy_arg_from_default_expr(node) is not None:
+            return True
+        return False
+
+    def _record(name: str, value):
+        if name in seen:
+            constants.pop(name, None)  # reassigned -> ambiguous, don't trust it
+            return
+        seen.add(name)
+        if value is not None and _is_static(value):
+            constants[name] = value
+
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    _record(target.id, node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            _record(node.target.id, node.value)
+
+    return constants
+
+
+def extract_parameters(args: ast.arguments, constants: dict | None = None) -> list[dict]:
+    """Extract parameter information from function arguments.
+
+    ``constants`` (from :func:`collect_module_constants`) lets a default that
+    is a bare module-level constant name be resolved to its literal value.
+    """
     params = []
+    constants = constants or {}
 
     # Calculate defaults offset for positional args
     num_args = len(args.args)
@@ -275,6 +331,11 @@ def extract_parameters(args: ast.arguments) -> list[dict]:
     def _set_default(param: dict, node: ast.expr):
         """Record both a source-text default AND (if applicable) a
         structured lazy-arg marker for dispatch-time evaluation."""
+        # Resolve a bare module-level constant name to its literal value node,
+        # statically (no import/exec). e.g. `timeout: float = DEFAULT_TIMEOUT`
+        # with `DEFAULT_TIMEOUT = 5.0` at module level becomes `5.0`.
+        if isinstance(node, ast.Name) and node.id in constants:
+            node = constants[node.id]
         param["default"] = expr_to_string(node)
         lazy = _lazy_arg_from_default_expr(node)
         if lazy:
@@ -346,6 +407,11 @@ def extract_cli_functions(content: str, file_path: Path, base_dir: Path, return_
         relative = file_path
     module_name = str(relative.with_suffix("")).replace("/", ".").replace(".__init__", "")
 
+    # Module-level constants, so a default written as a bare constant name
+    # (e.g. `timeout: float = DEFAULT_TIMEOUT`) resolves to its literal value
+    # without importing/executing the user module.
+    constants = collect_module_constants(tree)
+
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             for decorator in node.decorator_list:
@@ -355,7 +421,7 @@ def extract_cli_functions(content: str, file_path: Path, base_dir: Path, return_
                         "name": node.name,
                         "module": module_name,
                         "file_path": str(file_path),
-                        "parameters": extract_parameters(node.args),
+                        "parameters": extract_parameters(node.args, constants),
                         "byte_offset": node.col_offset,
                     }
                     if group:

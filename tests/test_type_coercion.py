@@ -12,6 +12,7 @@ from cliche.run import (
     _resolve_callable_type,
     build_parser_for_function,
     parse_default,
+    resolve_param_type,
     type_from_annotation,
 )
 
@@ -537,3 +538,58 @@ class TestBuildParserPathUnions:
         ns = parser.parse_args(["--p", "/tmp/x"])
         assert isinstance(ns.p, Path)
         assert ns.p == Path("/tmp/x")
+
+
+class TestUnannotatedBoolInference:
+    """`flag=True` with no annotation must build the `--no-flag` toggle.
+
+    Regression: param_type came only from the annotation, so an un-annotated
+    bool default fell back to `str` and argparse built a value-taking
+    `--flag VAL`. Usage generation keys off the default's truthiness and still
+    advertised `--no-flag`, so the advertised flag died as "unrecognized
+    arguments" (hit in the wild via sysdm's `--no-ls-after`).
+    """
+
+    def test_resolve_param_type_infers_bool_from_true_default(self):
+        assert resolve_param_type(None, "True") is bool
+
+    def test_resolve_param_type_infers_bool_from_false_default(self):
+        assert resolve_param_type(None, "False") is bool
+
+    def test_explicit_annotation_beats_boolish_default(self):
+        # `s: str = "True"` must stay a str, not become a flag.
+        assert resolve_param_type("str", '"True"') is str
+
+    def test_no_default_is_unaffected(self):
+        assert resolve_param_type(None, None) is str
+
+    def test_unannotated_true_builds_no_flag(self):
+        func = _func_info("create", "tests.test_type_coercion", [
+            {"name": "ls_after", "default": "True"},
+        ])
+        parser = build_parser_for_function(func)
+        assert parser.parse_args([]).ls_after is True
+        assert parser.parse_args(["--no-ls-after"]).ls_after is False
+
+    def test_unannotated_false_builds_positive_flag(self):
+        func = _func_info("create", "tests.test_type_coercion", [
+            {"name": "root", "default": "False"},
+        ])
+        parser = build_parser_for_function(func)
+        assert parser.parse_args([]).root is False
+        assert parser.parse_args(["--root"]).root is True
+
+    def test_annotated_bool_still_works(self):
+        func = _func_info("create", "tests.test_type_coercion", [
+            {"name": "ann", "type_annotation": "bool", "default": "True"},
+        ])
+        parser = build_parser_for_function(func)
+        assert parser.parse_args(["--no-ann"]).ann is False
+
+    def test_boolish_str_annotation_is_not_a_flag(self):
+        func = _func_info("create", "tests.test_type_coercion", [
+            {"name": "s", "type_annotation": "str", "default": '"True"'},
+        ])
+        parser = build_parser_for_function(func)
+        assert parser.parse_args([]).s == "True"
+        assert parser.parse_args(["--s", "x"]).s == "x"

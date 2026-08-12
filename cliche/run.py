@@ -1105,6 +1105,27 @@ def type_from_annotation(annotation: str):
     return type_map.get(annotation, str)
 
 
+def resolve_param_type(annotation: str, default_str: str):
+    """Like type_from_annotation, but infers `bool` from an un-annotated
+    True/False default.
+
+    Without this, `flag=True` (no annotation) resolves to `str` and argparse
+    builds a value-taking `--flag VAL` instead of the `--no-flag` toggle —
+    while usage generation, which keys off the default's truthiness, still
+    advertises `--no-flag`. Help and parser then disagree and the advertised
+    flag errors as "unrecognized arguments". Mirrors the usage-gen rule so the
+    two stay in sync.
+
+    Only an explicitly un-annotated param is inferred; an explicit annotation
+    always wins, so `x: str = "True"` stays a str.
+    """
+    if annotation:
+        return type_from_annotation(annotation)
+    if default_str is not None and str(default_str).lower() in ('true', 'false'):
+        return bool
+    return type_from_annotation(annotation)
+
+
 def parse_default(default_str: str, param_type):
     """Parse default value string to Python value."""
     if default_str is None:
@@ -1416,7 +1437,7 @@ def build_parser_for_function(func, enums=None, prog_name: str = "run.py", help_
         default_str = param.get('default')
         lazy_arg = param.get('lazy_arg')   # set by AST scanner for DateArg("today") etc.
 
-        param_type = type_from_annotation(annotation)
+        param_type = resolve_param_type(annotation, default_str)
         # Custom type callables: if the annotation is an unknown simple name
         # (type_from_annotation fell back to str) and the function's module
         # defines a matching callable, use that as argparse `type=`. Lets
@@ -2136,7 +2157,7 @@ def main():
                 annotation = param.get('type_annotation')
                 default_str = param.get('default')
                 has_default = default_str is not None
-                param_type = type_from_annotation(annotation)
+                param_type = resolve_param_type(annotation, default_str)
                 short_flag = short_flags.get(pname)
                 # Skip short flag if already used
                 if short_flag and short_flag in used_short:
